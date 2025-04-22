@@ -18,23 +18,8 @@ def cost_function(u, T_initial, T_setpoint, prediction_horizon, control_horizon,
         cost += (T_predicted - T_setpoint) ** 2
     return cost, T_history
 
-def plotting(optimal_control_actions, T_history, prediction_horizon, T_setpoint):
 
-    # Plotting
-    plt.figure(figsize=(10, 6))
-    time_steps = np.arange(prediction_horizon + 1)
-    plt.plot(time_steps, T_history, 'b-', label='Temperature')
-    plt.axhline(y=T_setpoint, color='r', linestyle='--', label='Setpoint')
-    plt.xlabel('Time Step')
-    plt.ylabel('Temperature (°C)')
-    plt.title('Predicted Temperature Over Time')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-
-
-
-def plotting2(optimal_control_actions, T_history, prediction_horizon, control_horizon, T_setpoint):
+def plotting(optimal_control_actions, T_history, prediction_horizon, control_horizon, T_setpoint):
     # Plotting
     fig, ax1 = plt.subplots()
 
@@ -97,7 +82,7 @@ def main_script():
     print("Optimal Control Actions:", optimal_control_actions)
     print(f"time taken: {time.time() - start_time:.2f} seconds")
 
-    plotting2(optimal_control_actions, T_history, prediction_horizon, control_horizon, T_setpoint)
+    plotting(optimal_control_actions, T_history, prediction_horizon, control_horizon, T_setpoint)
 
 
 if __name__ == "__main__":
