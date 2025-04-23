@@ -2,6 +2,7 @@ import numpy as np
 from scipy.optimize import minimize
 import time
 import matplotlib.pyplot as plt
+import copy
 
 
 class ShoeBox:
@@ -27,7 +28,7 @@ class ShoeBox:
         temp_surf = ((self.area_hull + self.area_ceiling) * self.temperature_storage + self.area_floor * temperature_supply) / (self.area_hull + self.area_floor + self.area_ceiling)
         return 0.5 * (self.temperature_air + temp_surf)
 
-    def timestep(self, temperature_outside, temperature_supply, delta_time=60):
+    def timestep(self, temperature_outside, temperature_supply, delta_time=120):
         heating_power = (temperature_supply - self.get_operative_temperature(temperature_supply)) / self.delta_temperature_max * self.heat_max
         heating_to_storage = heating_power * self.convective_portion
         heating_to_air = heating_power * (1 - self.convective_portion)
@@ -54,23 +55,30 @@ def cost_function(T_history, T_setpoint):
     return sum([(T - T_setpoint) ** 2 for T in T_history[1:]])
 
 
-def mpc(shoebox, temperature_supply, T_setpoint, temperature_outside, prediction_horizon, control_horizon):
+def mpc(actuation_strategy, shoebox, T_setpoint, temperature_outside, prediction_horizon, control_horizon):
+    shoebox_copy = copy.deepcopy(shoebox)
+    # shoebox_copy = copy.copy(shoebox) # funny enough: shallow copy is slower here
     T_history = np.empty(prediction_horizon + 1)
-    T_initial = shoebox.get_operative_temperature(temperature_supply[0])
+    temperature_supply = actuation_strategy[0]
+    T_initial = shoebox_copy.get_operative_temperature(temperature_supply)
     T_history[0] = T_initial
     T_predicted = T_initial
 
     for k in range(control_horizon):
         # T_predicted = model(T_predicted, u[k], a, b, T_out)
-        T_predicted = model(shoebox, temperature_supply[k], temperature_outside)
+        T_predicted = model(shoebox_copy, actuation_strategy[k], temperature_outside)
         T_history[k + 1] = T_predicted
     for k in range(control_horizon, prediction_horizon):
         # T_predicted = model(T_predicted, u[-1], a, b, T_out)  # Assume u stays constant beyond control horizon
-        T_predicted = model(shoebox, temperature_supply[-1], temperature_outside)
+        T_predicted = model(shoebox_copy, actuation_strategy[-1], temperature_outside)
         T_history[k + 1] = T_predicted
 
     cost = cost_function(T_history, T_setpoint)
     return cost, T_history
+
+
+def mpc_cost(actuation_strategy, shoebox, T_setpoint, temperature_outside, prediction_horizon, control_horizon):
+    return mpc(actuation_strategy, shoebox, T_setpoint, temperature_outside, prediction_horizon, control_horizon)[0]
 
 
 def plotting(optimal_control_actions, T_history, prediction_horizon, control_horizon, T_setpoint):
@@ -112,38 +120,31 @@ def main_script():
 
     # for i in range(3):
     # Prediction and control horizons
-    prediction_horizon = 100
-    control_horizon = 50
+    prediction_horizon = 300
+    control_horizon = 300
 
     # Constraints
     bounds = [(15, 35)] * control_horizon
 
     # Initial control actions
-    # u_initial = [20] * control_horizon
     temperature_supply_initial = np.array([15] * control_horizon)
 
     # Optimize control actions
-
     start_time = time.time()
+    result = minimize(mpc_cost, temperature_supply_initial, args=(shoebox, T_setpoint, temperature_outside,
+                                                                  prediction_horizon, control_horizon),
+                      bounds=bounds)
 
-    # def mpc(shoebox, temperature_suppy, T_setpoint, temperature_outside, prediction_horizon, control_horizon, ):
-    # result = minimize(lambda u: mpc(u, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)[0],
-    #                       u_initial, bounds=bounds)
-
-    result = minimize(lambda temperature_supply: mpc(shoebox, temperature_supply, T_setpoint, temperature_outside,
-                                                     prediction_horizon, control_horizon)[0],
-                      temperature_supply_initial, bounds=bounds)
-
-    # Optimal control actions
     # Optimal control actions
     optimal_control_actions = result.x
 
     # Calculate the temperature history with optimal control actions
     # _, T_history = mpc(optimal_control_actions, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)
-    _, T_history = mpc(shoebox, optimal_control_actions, T_setpoint, temperature_outside,
-        prediction_horizon, control_horizon)
+    _, T_history = mpc(optimal_control_actions, shoebox, T_setpoint, temperature_outside,
+                       prediction_horizon, control_horizon)
 
     print("Optimal Control Actions:", optimal_control_actions)
+    print("Function evaluations:", result.nfev)
     print(f"time taken: {time.time() - start_time:.2f} seconds")
 
     plotting(optimal_control_actions, T_history, prediction_horizon, control_horizon, T_setpoint)

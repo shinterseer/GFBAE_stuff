@@ -29,6 +29,10 @@ def mpc(u, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_o
     return cost, T_history
 
 
+def mpc_cost(u, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out):
+    return mpc(u, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)[0]
+
+
 def plotting(optimal_control_actions, T_history, prediction_horizon, control_horizon, T_setpoint):
     # Plotting
     fig, ax1 = plt.subplots()
@@ -76,13 +80,14 @@ def main_script():
     bounds = [(0, 1)] * control_horizon
 
     # Initial control actions
-    u_initial = [0.5] * control_horizon
+    u_initial = np.array([0.5] * control_horizon)
 
     # Optimize control actions
-
     start_time = time.time()
-    result = minimize(lambda u: mpc(u, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)[0],
-                      u_initial, bounds=bounds)
+    # result = minimize(lambda u: mpc(u, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)[0],
+    #                   u_initial, bounds=bounds)
+    result = minimize(mpc_cost, u_initial, args=(T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out),
+                      bounds=bounds)
 
     # Optimal control actions
     # Optimal control actions
