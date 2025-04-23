@@ -4,18 +4,28 @@ import time
 import matplotlib.pyplot as plt
 
 
-# Cost function
-def cost_function(u, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out):
+def model(T_predicted, u, a, b, T_out):
+    T_new = T_predicted + a * u + b * (T_out - T_predicted)
+    return T_new
+
+
+def cost_function(T_history, T_setpoint):
+    return sum([(T - T_setpoint) ** 2 for T in T_history[1:]])
+
+
+def mpc(u, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out):
+    T_history = np.empty(prediction_horizon + 1)
+    T_history[0] = T_initial
     T_predicted = T_initial
-    cost = 0
-    T_history = [T_initial]
-    for k in range(prediction_horizon):
-        if k < control_horizon:
-            T_predicted = T_predicted + a * u[k] + b * (T_out - T_predicted)
-        else:
-            T_predicted = T_predicted + a * u[-1] + b * (T_out - T_predicted)  # Assume u stays constant beyond control horizon
-        T_history.append(T_predicted)
-        cost += (T_predicted - T_setpoint) ** 2
+
+    for k in range(control_horizon):
+        T_predicted = model(T_predicted, u[k], a, b, T_out)
+        T_history[k + 1] = T_predicted
+    for k in range(control_horizon, prediction_horizon):
+        T_predicted = model(T_predicted, u[-1], a, b, T_out)  # Assume u stays constant beyond control horizon
+        T_history[k + 1] = T_predicted
+
+    cost = cost_function(T_history, T_setpoint)
     return cost, T_history
 
 
@@ -43,12 +53,14 @@ def plotting(optimal_control_actions, T_history, prediction_horizon, control_hor
     ax2.legend(loc='upper right')
 
     plt.title('Temperature and Control Actions Over Time')
+    ax1.grid()
     plt.show()
+
 
 def main_script():
     # Model parameters
-    a = 2
-    b = 0.1
+    a = 0.4
+    b = 0.02
     T_out = 7  # Outdoor temperature
 
     # Initial conditions
@@ -57,8 +69,8 @@ def main_script():
 
     # for i in range(3):
     # Prediction and control horizons
-    prediction_horizon = 60
-    control_horizon = 40
+    prediction_horizon = 100
+    control_horizon = 50
 
     # Constraints
     bounds = [(0, 1)] * control_horizon
@@ -69,7 +81,7 @@ def main_script():
     # Optimize control actions
 
     start_time = time.time()
-    result = minimize(lambda u: cost_function(u, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)[0],
+    result = minimize(lambda u: mpc(u, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)[0],
                       u_initial, bounds=bounds)
 
     # Optimal control actions
@@ -77,7 +89,7 @@ def main_script():
     optimal_control_actions = result.x
 
     # Calculate the temperature history with optimal control actions
-    _, T_history = cost_function(optimal_control_actions, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)
+    _, T_history = mpc(optimal_control_actions, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)
 
     print("Optimal Control Actions:", optimal_control_actions)
     print(f"time taken: {time.time() - start_time:.2f} seconds")
@@ -87,4 +99,4 @@ def main_script():
 
 if __name__ == "__main__":
     # alternative_main()
-   main_script()
+    main_script()
