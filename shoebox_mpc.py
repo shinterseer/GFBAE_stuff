@@ -7,7 +7,9 @@ import copy
 
 class ShoeBox:
     def __init__(self, lengths, heat_max=6000, delta_temperature_max=40, therm_sto=3.6e6, temp_init=20,
-                 convective_portion=0.5, u_value=0.5):
+                 convective_portion=0.5, u_value=0.5, temperature_supply_delta_max=0.1):
+        self.temperature_supply = temp_init
+        self.temperature_supply_delta_max = temperature_supply_delta_max
         self.volume = lengths[0] * lengths[1] * lengths[2]
         self.area_floor = lengths[0] * lengths[1]
         self.area_ceiling = lengths[0] * lengths[1]
@@ -28,8 +30,18 @@ class ShoeBox:
         temp_surf = ((self.area_hull + self.area_ceiling) * self.temperature_storage + self.area_floor * temperature_supply) / (self.area_hull + self.area_floor + self.area_ceiling)
         return 0.5 * (self.temperature_air + temp_surf)
 
-    def timestep(self, temperature_supply, temperature_outside, delta_time=120):
-        heating_power = (temperature_supply - self.get_operative_temperature(temperature_supply)) / self.delta_temperature_max * self.heat_max
+    def timestep(self, temperature_supply_setpoint, temperature_outside, delta_time=120):
+
+        # change supply temperature
+        if abs(self.temperature_supply - temperature_supply_setpoint) < self.temperature_supply_delta_max:
+            self.temperature_supply = temperature_supply_setpoint
+        elif self.temperature_supply <= temperature_supply_setpoint - self.temperature_supply_delta_max:
+            self.temperature_supply += self.temperature_supply_delta_max
+        elif self.temperature_supply >= temperature_supply_setpoint + self.temperature_supply_delta_max:
+            self.temperature_supply -= self.temperature_supply_delta_max
+
+        # change temperatures
+        heating_power = (self.temperature_supply - self.get_operative_temperature(self.temperature_supply)) / self.delta_temperature_max * self.heat_max
         heating_to_storage = heating_power * self.convective_portion
         heating_to_air = heating_power * (1 - self.convective_portion)
         storage_to_outside = self.thermal_transmittance * (self.temperature_air - temperature_outside)
@@ -51,7 +63,7 @@ def cost_function(T_history, T_setpoint):
     return np.sum((T_history[1:] - T_setpoint) ** 2)
 
 
-def mpc(actuation_strategy, shoebox, T_setpoint, temperature_outside, prediction_horizon, control_horizon):
+def mpc_inner(actuation_strategy, shoebox, T_setpoint, temperature_outside, prediction_horizon, control_horizon):
     shoebox_copy = copy.deepcopy(shoebox)
     # shoebox_copy = copy.copy(shoebox) # funny enough: shallow copy is slower here
     T_history = np.empty(prediction_horizon + 1)
@@ -74,15 +86,31 @@ def mpc(actuation_strategy, shoebox, T_setpoint, temperature_outside, prediction
     return cost
 
 
+def mpc_outer(num_timesteps, initial_control, bounds, shoebox, T_setpoint,
+              temperature_outside, prediction_horizon, control_horizon):
+    optimal_control_actions = list()
+    for i in range(num_timesteps):
+        result = minimize(mpc_inner, initial_control, args=(shoebox, T_setpoint, temperature_outside,
+                                                            prediction_horizon, control_horizon),
+                          bounds=bounds)
+
+        optimal_control_actions.append(result.x[0])
+        shoebox.timestep(optimal_control_actions[-1], temperature_outside)
+
+    return np.array(optimal_control_actions)
+
+
 def get_property_series(shoebox, actuation_strategy, temperature_outside):
-    dim = actuation_strategy.size
+    dim = len(actuation_strategy)
     temperature_storage = np.empty(dim + 1)
     temperature_air = np.empty(dim + 1)
-    temperature_operative = np.empty(dim+1)
+    temperature_operative = np.empty(dim + 1)
+    temperature_supply = np.empty(dim + 1)
 
     temperature_storage[0] = shoebox.temperature_storage
     temperature_air[0] = shoebox.temperature_air
     temperature_operative[0] = shoebox.get_operative_temperature(actuation_strategy[0])
+    temperature_supply[0] = shoebox.temperature_air
 
     for k in range(dim):
         u = actuation_strategy[k]
@@ -92,34 +120,41 @@ def get_property_series(shoebox, actuation_strategy, temperature_outside):
         temperature_storage[k + 1] = shoebox.temperature_storage
         temperature_air[k + 1] = shoebox.temperature_air
         temperature_operative[k + 1] = shoebox.get_operative_temperature(u)
+        temperature_supply[k + 1] = shoebox.temperature_supply
 
     return {"temperature_air": temperature_air,
             "temperature_storage": temperature_storage,
-            "temperature_operative": temperature_operative}
+            "temperature_operative": temperature_operative,
+            "temperature_supply": temperature_supply}
 
+def post_proc(optimal_control_actions, num_timesteps, T_setpoint, lengths, temperature_outside):
 
-def plotting(optimal_control_actions, T_history, prediction_horizon, control_horizon, T_setpoint):
+    shoebox = ShoeBox(lengths)
+    property_dict = get_property_series(shoebox, actuation_strategy=optimal_control_actions,
+                                        temperature_outside=temperature_outside)
     # Plotting
     fig, ax1 = plt.subplots()
 
     # Temperature plot
-    time_steps = np.arange(prediction_horizon + 1)
-    ax1.plot(time_steps, T_history, 'b-', label='Temperature')
+    time_steps = np.arange(num_timesteps + 1)
+    ax1.plot(time_steps, property_dict["temperature_operative"], 'b-', label='Temperature_operative')
+    ax1.plot(time_steps, property_dict["temperature_supply"], 'g-', label='Temperature_supply')
     ax1.set_xlabel('Time Step')
     ax1.set_ylabel('Temperature (°C)', color='b')
     ax1.tick_params(axis='y', labelcolor='b')
     ax1.axhline(y=T_setpoint, color='r', linestyle='--', label='Setpoint')
+    ax1.step(np.arange(num_timesteps), optimal_control_actions, 'g-', where='mid', label='Control Actions')
 
     # Control actions plot
-    ax2 = ax1.twinx()
-    control_steps = np.arange(control_horizon)
-    ax2.step(control_steps, optimal_control_actions, 'g-', where='mid', label='Control Actions')
-    ax2.set_ylabel('Control Actions', color='g')
-    ax2.tick_params(axis='y', labelcolor='g')
+    # ax2 = ax1.twinx()
+    # control_steps = np.arange(num_timesteps)
+    # ax2.step(control_steps, optimal_control_actions, 'g-', where='mid', label='Control Actions')
+    # ax2.set_ylabel('Control Actions', color='g')
+    # ax2.tick_params(axis='y', labelcolor='g')
 
     # Adding legends
     ax1.legend(loc='upper left')
-    ax2.legend(loc='upper right')
+    # ax2.legend(loc='upper right')
 
     plt.title('Temperature and Control Actions Over Time')
     ax1.grid()
@@ -131,14 +166,15 @@ def main_script():
     lengths = (5, 5, 5)
     shoebox = ShoeBox(lengths=lengths)
     temperature_outside = 7
+    num_timesteps = 300
 
     # Initial conditions
     T_setpoint = 23  # Desired room temperature
 
     # for i in range(3):
     # Prediction and control horizons
-    prediction_horizon = 300
-    control_horizon = 300
+    prediction_horizon = 10
+    control_horizon = 5
 
     # Constraints
     bounds = [(15, 35)] * control_horizon
@@ -148,21 +184,15 @@ def main_script():
 
     # Optimize control actions
     start_time = time.time()
-    # result = minimize(mpc_cost, temperature_supply_initial, args=(shoebox, T_setpoint, temperature_outside,
-    #                                                              prediction_horizon, control_horizon),
-    #                   bounds=bounds)
-    result = minimize(mpc, temperature_supply_initial, args=(shoebox, T_setpoint, temperature_outside,
-                                                             prediction_horizon, control_horizon),
-                      bounds=bounds)
 
-    # Optimal control actions
-    optimal_control_actions = result.x
+    optimal_control_actions = mpc_outer(num_timesteps, temperature_supply_initial, bounds, shoebox, T_setpoint,
+                                          temperature_outside, prediction_horizon, control_horizon)
 
     # Calculate the temperature history with optimal control actions
     # _, T_history = mpc(optimal_control_actions, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)
 
     shoebox_new = ShoeBox(lengths=lengths)
-    temperature_outside_array = np.ones(optimal_control_actions.size + 1) * temperature_outside
+    temperature_outside_array = np.ones(num_timesteps + 1) * temperature_outside
     # optimal_control_actions = np.ones(optimal_control_actions.size) * 7
     result_dict = get_property_series(shoebox=shoebox_new, actuation_strategy=optimal_control_actions,
                                       temperature_outside=temperature_outside_array)
@@ -171,10 +201,11 @@ def main_script():
     #                    prediction_horizon, control_horizon)
 
     print("Optimal Control Actions:", optimal_control_actions)
-    print("Function evaluations:", result.nfev)
+    # print("Function evaluations:", result.nfev)
     print(f"time taken: {time.time() - start_time:.2f} seconds")
 
-    plotting(optimal_control_actions, T_history, prediction_horizon, control_horizon, T_setpoint)
+    post_proc(optimal_control_actions, num_timesteps, T_setpoint, lengths,
+              temperature_outside=np.full(num_timesteps, temperature_outside))
 
 
 if __name__ == "__main__":
