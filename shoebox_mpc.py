@@ -32,14 +32,6 @@ class ShoeBox:
 
     def timestep(self, temperature_supply_change_signal, temperature_outside, delta_time=120):
 
-        # change supply temperature
-        # if abs(self.temperature_supply - temperature_supply_setpoint) < self.temperature_supply_delta_max:
-        #     self.temperature_supply = temperature_supply_setpoint
-        # elif self.temperature_supply <= temperature_supply_setpoint - self.temperature_supply_delta_max:
-        #     self.temperature_supply += self.temperature_supply_delta_max
-        # elif self.temperature_supply >= temperature_supply_setpoint + self.temperature_supply_delta_max:
-        #     self.temperature_supply -= self.temperature_supply_delta_max
-
         self.temperature_supply += temperature_supply_change_signal * self.temperature_supply_delta_max
 
         # change temperatures
@@ -77,8 +69,8 @@ def mpc_inner(actuation_strategy, shoebox, T_setpoint, temperature_outside, pred
         # T_predicted = model(T_predicted, u[k], a, b, T_out)
         T_history[k + 1] = model(shoebox_copy, actuation_strategy[k], temperature_outside, time_delta=time_delta)
     for k in range(control_horizon, prediction_horizon):
-        # T_predicted = model(T_predicted, u[-1], a, b, T_out)  # Assume u stays constant beyond control horizon
-        T_history[k + 1] = model(shoebox_copy, actuation_strategy[-1], temperature_outside, time_delta=time_delta)
+        # T_history[k + 1] = model(shoebox_copy, actuation_strategy[-1], temperature_outside, time_delta=time_delta) # take last action
+        T_history[k + 1] = model(shoebox_copy, 0, temperature_outside, time_delta=time_delta) # take action = 0
 
     cost = cost_function(T_history, T_setpoint)
     # return cost, T_history
@@ -174,6 +166,7 @@ def main_script():
     shoebox = ShoeBox(lengths=lengths)
     temperature_outside = 7
     simulated_time = 8 * 3600
+    # delta_time = 60
     delta_time = 60
     num_timesteps = int(simulated_time / delta_time)
 
@@ -182,7 +175,7 @@ def main_script():
 
     # for i in range(3):
     # Prediction and control horizons
-    prediction_horizon = 100
+    prediction_horizon = 10
     control_horizon = 5
 
     # Constraints
@@ -212,6 +205,9 @@ def main_script():
 
     if False:
         print("Optimal Control Actions:", optimal_control_actions)
+
+    print(f"Final cost function: {cost_function(T_history, T_setpoint):.3e}")
+
     print(f"time taken: {time.time() - start_time:.2f} seconds")
 
     post_proc(optimal_control_actions, num_timesteps, T_setpoint, lengths,
