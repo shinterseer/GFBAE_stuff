@@ -71,8 +71,37 @@ def cost_function_temperature_setpoint(T_history, T_setpoint):
     return np.sum((T_history[1:] - T_setpoint) ** 2)
 
 
+def cost_function_demand_response_single(heating_power, power_weight,
+                                         temperature_operative, temperature_max, temperature_min):
+    power_penalty = heating_power * power_weight
+    comfort_penalty = (np.max(temperature_operative - temperature_max, 0)
+                       + np.max(temperature_min - temperature_operative, 0))
+    return power_penalty + 1.e6 * comfort_penalty
+
+
+def cost_function_demand_response2(heating_strategy, power_weight_curve,
+                                  temperature_operative_series, temperature_max, temperature_min):
+    # return sum([cost_function_demand_response_single(heating_strategy[i], power_weight_curve[i],
+    #                                                  temperature_operative_series[i], temperature_max, temperature_min)
+    #            for i in range(heating_strategy.size)])
+    mysum = 0
+    for i in range(heating_strategy.size):
+        mysum += cost_function_demand_response_single(heating_strategy[i], power_weight_curve[i],
+                                  temperature_operative_series[i], temperature_max, temperature_min)
+    return mysum
+
+
 def cost_function_demand_response(heating_strategy, power_weight_curve,
                                   temperature_operative_series, temperature_max, temperature_min):
+    # return sum([cost_function_demand_response_single(heating_strategy[i], power_weight_curve[i],
+    #                                                  temperature_operative_series[i], temperature_max, temperature_min)
+    #            for i in range(heating_strategy.size)])
+    # mysum = 0
+    # for i in range(heating_strategy.size):
+    #     mysum += cost_function_demand_response_single(heating_strategy[i], power_weight_curve[i],
+    #                               temperature_operative_series[i], temperature_max, temperature_min)
+    # return mysum
+
     power_penalty = heating_strategy.dot(power_weight_curve)
     comfort_penalty = (np.maximum(temperature_operative_series - temperature_max, 0).sum()
                        + np.maximum(temperature_min - temperature_operative_series, 0).sum())
@@ -100,12 +129,15 @@ def get_consumption_weight_curve(filename="Lastprofile VDEW_alle.csv", key="Haus
     return load_curve / peak
 
 
-def get_property_series(shoebox, actuation_strategy, temperature_outside, time_delta):
+def get_property_series(shoebox, actuation_strategy, temperature_outside, time_delta, power_weight_curve):
     dim = len(actuation_strategy)
     temperature_storage = np.empty(dim + 1)
     temperature_air = np.empty(dim + 1)
     temperature_operative = np.empty(dim + 1)
     temperature_supply = np.empty(dim + 1)
+    cost_power = np.empty(dim + 1)
+    cost_comfort = np.empty(dim + 1)
+    cost_total = np.empty(dim + 1)
 
     temperature_storage[0] = shoebox.temperature_storage
     temperature_air[0] = shoebox.temperature_air
@@ -128,10 +160,18 @@ def get_property_series(shoebox, actuation_strategy, temperature_outside, time_d
             "temperature_supply": temperature_supply}
 
 
-def post_proc(actuation_strategy, num_timesteps, T_setpoint, lengths, temperature_outside, time_delta):
+def array_to_time_series(array, step_in_minutes=5, start_time="2025-04-29 00:00"):
+    step = pd.Timedelta(minutes=step_in_minutes)
+    index = pd.date_range(start=pd.Timestamp(start_time), periods=len(array), freq=step)
+    return pd.Series(array, index=index)
+
+
+def post_proc(actuation_strategy, num_timesteps, T_setpoint,
+              lengths, temperature_outside, time_delta, power_weight_curve):
     shoebox = ShoeBox(lengths)
     property_dict = get_property_series(shoebox, actuation_strategy=actuation_strategy,
-                                        temperature_outside=temperature_outside, time_delta=time_delta)
+                                        temperature_outside=temperature_outside, time_delta=time_delta,
+                                        power_weight_curve=power_weight_curve)
     # Plotting
     fig, ax1 = plt.subplots()
 
@@ -142,13 +182,17 @@ def post_proc(actuation_strategy, num_timesteps, T_setpoint, lengths, temperatur
     ax1.tick_params(axis='y', labelcolor='b')
     ax1.axhline(y=T_setpoint, color='r', linestyle='--', label='Setpoint')
     # ax1.step(np.arange(num_timesteps), actuation_strategy, 'g-', where='mid', label='Control Actions')
-    ax1.plot(time_steps, property_dict["temperature_operative"], 'b-', label='Temperature_operative')
+
+    # ax1.plot(time_steps, property_dict["temperature_operative"], 'b-', label='Temperature_operative')
+    ax1.plot(array_to_time_series(property_dict["temperature_operative"]), 'b-', label='Temperature_operative')
+
     # ax1.plot(time_steps, property_dict["temperature_supply"], color='orange', label='Temperature_supply')
 
     # Control actions plot
     ax2 = ax1.twinx()
-    control_steps = np.arange(num_timesteps)
-    ax2.step(control_steps, actuation_strategy, 'g-', where='mid', label='Control Actions')
+    # control_steps = np.arange(num_timesteps)
+    # ax2.step(control_steps, actuation_strategy, 'g-', where='mid', label='Control Actions')
+    ax2.step(array_to_time_series(actuation_strategy), 'g-', where='mid', label='Control Actions')
     ax2.set_ylabel('actuation strategy (heating power in W)')
     # ax2.tick_params(axis='y')
 
@@ -158,7 +202,8 @@ def post_proc(actuation_strategy, num_timesteps, T_setpoint, lengths, temperatur
 
     plt.title('Temperature and Control Actions Over Time')
     ax1.grid()
-    plt.show()
+    plt.show(block=True)
+    x=0
 
 
 def main_script():
@@ -199,7 +244,7 @@ def main_script():
     # Optimize control actions
     start_time = time.time()
 
-    minimize_results = minimize(cost_wrapper, heating_power_initial,  # method="Powell",
+    minimize_results = minimize(cost_wrapper, heating_power_initial, #method="Powell",
                                 args=(shoebox, temperature_outside_series, time_delta, temperature_setpoint, power_weight_curve, temperature_min, temperature_max),
                                 bounds=bounds)
 
@@ -208,7 +253,7 @@ def main_script():
     # _, T_history = mpc(optimal_control_actions, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)
 
     shoebox_new = ShoeBox(lengths=lengths)
-    temperature_outside_array = np.ones(num_timesteps + 1) * temperature_outside
+    temperature_outside_array = np.full(num_timesteps, temperature_outside)
     # optimal_control_actions = np.ones(optimal_control_actions.size) * 7
     # result_dict = get_property_series(shoebox=shoebox_new, actuation_strategy=actuation_strategy,
     #                                   temperature_outside=temperature_outside_array)
@@ -221,7 +266,8 @@ def main_script():
     print(f"time taken: {time.time() - start_time:.2f} seconds")
 
     post_proc(actuation_strategy, num_timesteps, temperature_setpoint, lengths,
-              temperature_outside=np.full(num_timesteps, temperature_outside), time_delta=time_delta)
+              temperature_outside=temperature_outside_array, time_delta=time_delta,
+              power_weight_curve=power_weight_curve)
 
 
 if __name__ == "__main__":
