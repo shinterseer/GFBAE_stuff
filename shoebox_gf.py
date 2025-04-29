@@ -65,16 +65,27 @@ def model(shoebox, heating_strategy, temperature_outside_series, time_delta):
     return temperature_operative_series
 
 
-def cost_function(T_history, T_setpoint):
+def cost_function_temperature_setpoint(T_history, T_setpoint):
     """this should now call model to get the history of the operative temperature"""
     # return sum([(T - T_setpoint) ** 2 for T in T_history[1:]])
     return np.sum((T_history[1:] - T_setpoint) ** 2)
 
 
-def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, delta_time, temperature_setpoint):
+def cost_function_demand_response(heating_strategy, power_weight_curve,
+                                  temperature_operative_series, temperature_max, temperature_min):
+    power_penalty = heating_strategy.dot(power_weight_curve)
+    comfort_penalty = (np.maximum(temperature_operative_series - temperature_max, 0).sum()
+                       + np.maximum(temperature_min - temperature_operative_series, 0).sum())
+    return power_penalty + 1.e6 * comfort_penalty
+
+
+def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, delta_time, temperature_setpoint,
+                 power_weight_curve, temperature_min, temperature_max):
     shoebox_copy = copy.deepcopy(shoebox)
     temperature_operative_series = model(shoebox_copy, heating_strategy, temperature_outside_series, delta_time)
-    return cost_function(temperature_operative_series, temperature_setpoint)
+    # return cost_function_temperature_setpoint(temperature_operative_series, temperature_setpoint)
+    return cost_function_demand_response(heating_strategy, power_weight_curve,
+                                  temperature_operative_series, temperature_max, temperature_min)
 
 
 def get_load_curve(filename="Lastprofile VDEW_alle.csv", key="Haushalt_Winter"):
@@ -86,9 +97,6 @@ def get_load_curve(filename="Lastprofile VDEW_alle.csv", key="Haushalt_Winter"):
 def get_consumption_weight_curve(filename="Lastprofile VDEW_alle.csv", key="Haushalt_Winter"):
     load_curve = get_load_curve(filename, key)
     peak = load_curve.max()
-    plt.plot(load_curve / peak)
-    plt.grid()
-    plt.show(block=True)
     return load_curve / peak
 
 
@@ -154,16 +162,23 @@ def post_proc(actuation_strategy, num_timesteps, T_setpoint, lengths, temperatur
 
 
 def main_script():
-    # get_consumption_weight_curve()
 
     # Model parameters
     lengths = (5, 5, 5)
     shoebox = ShoeBox(lengths=lengths)
     temperature_outside = 7
     simulated_time = 24 * 3600
-    time_delta = 60 * 5
+    timestep_in_minutes = 5
+    time_delta = 60 * timestep_in_minutes
     num_timesteps = int(simulated_time / time_delta)
     temperature_outside_series = np.full(num_timesteps, temperature_outside)
+    power_weight_curve = get_consumption_weight_curve()
+    power_weight_curve = power_weight_curve.resample('5min').mean()
+    new_time1 = power_weight_curve.index[-1] + pd.Timedelta(minutes=5)
+    new_time2 = power_weight_curve.index[-1] + pd.Timedelta(minutes=10)
+    power_weight_curve = power_weight_curve.interpolate()
+    power_weight_curve[new_time1] = power_weight_curve.iloc[-1]
+    power_weight_curve[new_time2] = power_weight_curve.iloc[-1]
 
     # heating_strategy = np.full(num_timesteps, 1000)
     # temperature_operative_series = model(shoebox, heating_strategy, temperature_outside, delta_time)
@@ -173,7 +188,8 @@ def main_script():
 
     # Initial conditions
     temperature_setpoint = 23  # Desired room temperature
-
+    temperature_min = 20
+    temperature_max = 24
     # Constraints
     bounds = [(0, 6000)] * num_timesteps
 
@@ -183,8 +199,8 @@ def main_script():
     # Optimize control actions
     start_time = time.time()
 
-    minimize_results = minimize(cost_wrapper, heating_power_initial, #method="Powell",
-                                args=(shoebox, temperature_outside_series, time_delta, temperature_setpoint),
+    minimize_results = minimize(cost_wrapper, heating_power_initial,  # method="Powell",
+                                args=(shoebox, temperature_outside_series, time_delta, temperature_setpoint, power_weight_curve, temperature_min, temperature_max),
                                 bounds=bounds)
 
     actuation_strategy = minimize_results.x
