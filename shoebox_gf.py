@@ -9,7 +9,7 @@ import pandas as pd
 
 class ShoeBox:
     def __init__(self, lengths, heat_max=6000, delta_temperature_max=40, therm_sto=3.6e6, temp_init=21,
-                 convective_portion=0.3, u_value=0.25, temperature_supply_delta_max=0.05):
+                 convective_portion=0.3, u_value=0.3, temperature_supply_delta_max=0.05):
         self.temperature_supply = temp_init
         # self.temperature_supply_delta_max = temperature_supply_delta_max
         self.volume = lengths[0] * lengths[1] * lengths[2]
@@ -142,9 +142,13 @@ def get_consumption_weight_curve(filename="Lastprofile VDEW_alle.csv", key="Haus
     return load_curve / peak
 
 
-def get_property_series(shoebox, actuation_strategy, temperature_outside, time_delta, power_weight_curve,
-                        temperature_max, temperature_min):
-    dim = len(actuation_strategy)
+def get_postproc_info(shoebox, actuation_sequence, temperature_outside, time_delta, power_weight_curve,
+                      temperature_max, temperature_min):
+    dim = len(actuation_sequence)
+    total_energy_turnover = time_delta * np.sum(np.abs(actuation_sequence))
+    grid_burden = time_delta * np.dot(actuation_sequence, power_weight_curve)
+    peak_alignment_factor = grid_burden / total_energy_turnover
+
     temperature_storage = np.empty(dim + 1)
     temperature_air = np.empty(dim + 1)
     temperature_operative = np.empty(dim + 1)
@@ -162,7 +166,7 @@ def get_property_series(shoebox, actuation_strategy, temperature_outside, time_d
     cost_comfort[0] = 0
 
     for k in range(dim):
-        u = actuation_strategy[k]
+        u = actuation_sequence[k]
         te = temperature_outside[k]
         # shoebox.timestep(te, u)
         shoebox.timestep(u, te, time_delta)
@@ -180,7 +184,10 @@ def get_property_series(shoebox, actuation_strategy, temperature_outside, time_d
             "temperature_supply": temperature_supply,
             "temperature_surface": temperature_surface,
             "cost_power": cost_power,
-            "cost_comfort": cost_comfort}
+            "cost_comfort": cost_comfort,
+            "total_energy_turnover": total_energy_turnover,
+            "grid_burden": grid_burden,
+            "peak_alignment_factor": peak_alignment_factor}
 
 
 def array_to_time_series(array, step_in_minutes=5, start_time="2025-04-29 00:00"):
@@ -190,14 +197,7 @@ def array_to_time_series(array, step_in_minutes=5, start_time="2025-04-29 00:00"
     return pd.Series(np.array(array), index=index)
 
 
-def post_proc(actuation_strategy, num_timesteps, T_setpoint,
-              lengths, temperature_outside, time_delta, power_weight_curve,
-              temperature_min, temperature_max):
-    shoebox = ShoeBox(lengths)
-    property_dict = get_property_series(shoebox, actuation_strategy=actuation_strategy,
-                                        temperature_outside=temperature_outside, time_delta=time_delta,
-                                        power_weight_curve=power_weight_curve,
-                                        temperature_min=temperature_min, temperature_max=temperature_max)
+def post_proc(postproc_dict, actuation_sequence, power_weight_curve):
     # Plotting
     fig, axes = plt.subplots(nrows=2, ncols=2)
 
@@ -207,18 +207,18 @@ def post_proc(actuation_strategy, num_timesteps, T_setpoint,
     ax_top.set_ylabel('Temperature in °C', color='b')
     ax_top.tick_params(axis='y', labelcolor='b')
     # ax_top.axhline(y=T_setpoint, color='r', linestyle='--', label='Setpoint')
-    # ax1.step(np.arange(num_timesteps), actuation_strategy, 'g-', where='mid', label='Control Actions')
+    # ax1.step(np.arange(num_timesteps), actuation_sequence, 'g-', where='mid', label='Control Actions')
     ax_top.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    # ax1.plot(time_steps, property_dict["temperature_operative"], 'b-', label='Temperature_operative')
-    ax_top.plot(array_to_time_series(property_dict["temperature_operative"]), 'b-', label='Temperature_operative')
+    # ax1.plot(time_steps, postproc_dict["temperature_operative"], 'b-', label='Temperature_operative')
+    ax_top.plot(array_to_time_series(postproc_dict["temperature_operative"]), 'b-', label='Temperature_operative')
 
     # Control actions plot
     ax_top2 = ax_top.twinx()
     # control_steps = np.arange(num_timesteps)
-    # ax2.step(control_steps, actuation_strategy, 'g-', where='mid', label='Control Actions')
-    # ax_top2.step(array_to_time_series(actuation_strategy), 'g-', where='mid', label='Control Actions')
-    ax_top2.plot(array_to_time_series(actuation_strategy), 'g-', label='Control Actions')
-    ax_top2.set_ylabel('actuation strategy (heating power in W)')
+    # ax2.step(control_steps, actuation_sequence, 'g-', where='mid', label='Control Actions')
+    # ax_top2.step(array_to_time_series(actuation_sequence), 'g-', where='mid', label='Control Actions')
+    ax_top2.plot(array_to_time_series(actuation_sequence), 'g-', label='Control Actions')
+    ax_top2.set_ylabel('actuation sequence (heating power in W)')
     # ax2.tick_params(axis='y')
 
     # Adding legends
@@ -228,41 +228,38 @@ def post_proc(actuation_strategy, num_timesteps, T_setpoint,
 
     ax_temperatures = axes[1, 0]
     ax_temperatures.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    ax_temperatures.plot(array_to_time_series(property_dict["temperature_operative"]), label="T_op")
-    ax_temperatures.plot(array_to_time_series(property_dict["temperature_air"]), label="T_air")
-    ax_temperatures.plot(array_to_time_series(property_dict["temperature_surface"]), label="T_surf")
-    ax_temperatures.plot(array_to_time_series(property_dict["temperature_storage"]), label="T_storage")
+    ax_temperatures.plot(array_to_time_series(postproc_dict["temperature_operative"]), label="T_op")
+    ax_temperatures.plot(array_to_time_series(postproc_dict["temperature_air"]), label="T_air")
+    ax_temperatures.plot(array_to_time_series(postproc_dict["temperature_surface"]), label="T_surf")
+    ax_temperatures.plot(array_to_time_series(postproc_dict["temperature_storage"]), label="T_storage")
     ax_temperatures.grid()
     ax_temperatures.legend()
 
     ax_cost = axes[0, 1]
     ax_cost.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    ax_cost.plot(array_to_time_series(property_dict["cost_power"]), label="cost power")
-    ax_cost.plot(array_to_time_series(property_dict["cost_comfort"]), label="cost comfort")
-    ax_cost.plot(array_to_time_series(property_dict["cost_power"] + property_dict["cost_comfort"]), label="cost total")
+    ax_cost.plot(array_to_time_series(postproc_dict["cost_power"]), label="cost power")
+    ax_cost.plot(array_to_time_series(postproc_dict["cost_comfort"]), label="cost comfort")
+    ax_cost.plot(array_to_time_series(postproc_dict["cost_power"] + postproc_dict["cost_comfort"]), label="cost total")
     ax_cost.grid()
     ax_cost.legend()
     ax_cost2 = ax_cost.twinx()
     ax_cost2.plot(array_to_time_series(power_weight_curve), label="power weight curve")
-    print(f'final cost sum: {sum(property_dict["cost_power"] + property_dict["cost_comfort"]):.4f}')
 
     plt.show(block=True)
-
     x = 0
 
 
 def main_script():
     # Model parameters
-    lengths = (5, 5, 5)
-    shoebox = ShoeBox(lengths=lengths)
     temperature_outside = 7
     simulated_time = 24 * 3600
     timestep_in_minutes = 5
     time_delta = 60 * timestep_in_minutes
     num_timesteps = int(simulated_time / time_delta)
     temperature_outside_series = np.full(num_timesteps, temperature_outside)
+
     power_weight_curve = get_consumption_weight_curve()
-    power_weight_curve = power_weight_curve.resample('5min').mean()
+    power_weight_curve = power_weight_curve.resample(f'{timestep_in_minutes}min').mean()
     new_time1 = power_weight_curve.index[-1] + pd.Timedelta(minutes=5)
     new_time2 = power_weight_curve.index[-1] + pd.Timedelta(minutes=10)
     power_weight_curve = power_weight_curve.interpolate()
@@ -285,35 +282,59 @@ def main_script():
     # Initial control actions
     heating_power_initial = np.array([1000] * num_timesteps)
 
+    lengths = (5, 5, 5)
     # Optimize control actions
-    start_time = time.time()
 
-    minimize_results = minimize(cost_wrapper, heating_power_initial,  # method="Powell",
-                                args=(shoebox, temperature_outside_series, time_delta, temperature_setpoint, power_weight_curve,
-                                      temperature_min, temperature_max),
-                                bounds=bounds)
+    # print("u-value, peak alignment factor, total energy turnover, grid burden, computation time in s")
+    print("thermal capacity, peak alignment factor, total energy turnover, grid burden, computation time in s")
+    # df_results = pd.DataFrame(columns=["u-value", "peak alignment factor", "total energy turnover", "grid burden", "computation time"])
+    df_results = pd.DataFrame(columns=["thermal capacity", "peak alignment factor", "total energy turnover", "grid burden", "computation time"])
+    u_values = [0.1, .15, 0.2, .25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
+    thermal_capacities = 1.e6 * np.array([1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.])
+    # u_values = [0.1, 0.2]
 
-    actuation_strategy = minimize_results.x
-    # Calculate the temperature history with optimal control actions
-    # _, T_history = mpc(optimal_control_actions, T_initial, T_setpoint, prediction_horizon, control_horizon, a, b, T_out)
+    for i in range(len(thermal_capacities)):
+        # for i in range(len(u_values)):
+        # u_value = u_values[i]
+        therm_sto = thermal_capacities[i]
+        start_time = time.time()
+        # shoebox = ShoeBox(lengths=lengths, u_value=u_value)
+        shoebox = ShoeBox(lengths=lengths, therm_sto=therm_sto)
 
-    shoebox_new = ShoeBox(lengths=lengths)
-    temperature_outside_array = np.full(num_timesteps, temperature_outside)
-    # optimal_control_actions = np.ones(optimal_control_actions.size) * 7
-    # result_dict = get_property_series(shoebox=shoebox_new, actuation_strategy=actuation_strategy,
-    #                                   temperature_outside=temperature_outside_array)
-    # T_history = result_dict["temperature_operative"]
-    # _, T_history = mpc(optimal_control_actions, shoebox, T_setpoint, temperature_outside,
-    #                    prediction_horizon, control_horizon)
+        minimize_results = minimize(cost_wrapper, heating_power_initial,  # method="Powell",
+                                    args=(shoebox, temperature_outside_series, time_delta, temperature_setpoint, power_weight_curve,
+                                          temperature_min, temperature_max),
+                                    bounds=bounds)
 
-    print("actuation_strategy: ", actuation_strategy)
-    # print("Function evaluations:", result.nfev)
-    print(f"time taken: {time.time() - start_time:.2f} seconds")
+        actuation_sequence = minimize_results.x
 
-    post_proc(actuation_strategy, num_timesteps, temperature_setpoint, lengths,
-              temperature_outside=temperature_outside_array, time_delta=time_delta,
-              power_weight_curve=power_weight_curve,
-              temperature_min=temperature_min, temperature_max=temperature_max)
+        shoebox_fresh = ShoeBox(lengths)
+        postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
+                                          temperature_outside=temperature_outside_series, time_delta=time_delta,
+                                          power_weight_curve=power_weight_curve,
+                                          temperature_min=temperature_min, temperature_max=temperature_max)
+        computation_time = time.time() - start_time
+
+        # df_results.loc[i] = [u_value,
+        #                      postproc_dict['peak_alignment_factor'],
+        #                      postproc_dict['total_energy_turnover'],
+        #                      postproc_dict['grid_burden'],
+        #                      computation_time]
+        df_results.loc[i] = [therm_sto,
+                             postproc_dict['peak_alignment_factor'],
+                             postproc_dict['total_energy_turnover'],
+                             postproc_dict['grid_burden'],
+                             computation_time]
+
+        # print(f"{u_value}, "
+        print(f"{therm_sto}, "
+              f"{postproc_dict['peak_alignment_factor']:.3f}, "
+              f"{postproc_dict['total_energy_turnover']:.3f}, "
+              f"{postproc_dict['grid_burden']:.3f}, "
+              f"{computation_time:.3f}")
+
+    df_results.to_csv('shoebox_results.csv')
+    # post_proc(postproc_dict, actuation_sequence=actuation_sequence, power_weight_curve=power_weight_curve)
 
 
 if __name__ == "__main__":
