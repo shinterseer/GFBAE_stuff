@@ -105,30 +105,26 @@ def cost_function_demand_response2(heating_strategy, power_weight_curve,
 
 def cost_function_demand_response(heating_strategy, power_weight_curve,
                                   temperature_operative_series, temperature_max, temperature_min,
-                                  power_penalty_weight=1., comfort_penalty_weight=1.e9):
-    # return sum([cost_function_demand_response_single(heating_strategy[i], power_weight_curve[i],
-    #                                                  temperature_operative_series[i], temperature_max, temperature_min)
-    #            for i in range(heating_strategy.size)])
-    # mysum = 0
-    # for i in range(heating_strategy.size):
-    #     mysum += cost_function_demand_response_single(heating_strategy[i], power_weight_curve[i],
-    #                               temperature_operative_series[i], temperature_max, temperature_min)
-    # return mysum
-
+                                  power_penalty_weight=1., comfort_penalty_weight=1.e5):
     power_penalty = np.dot(heating_strategy, power_weight_curve)
-    comfort_penalty = (np.maximum(temperature_operative_series - temperature_max, 0).sum()
-                       + np.maximum(temperature_min - temperature_operative_series, 0).sum())
-    # return power_penalty + 1.e9 * comfort_penalty
+    comfort_penalty_base = (temperature_operative_series - 0.5 * (temperature_max - temperature_min)).sum() / comfort_penalty_weight
+    comfort_penalty_soft = (np.maximum(temperature_operative_series - temperature_max - .1, 0).sum()
+                            + np.maximum(temperature_min + .1 - temperature_operative_series, 0).sum()) / np.sqrt(comfort_penalty_weight)
+    comfort_penalty_hard = (np.maximum(temperature_operative_series - temperature_max, 0).sum()
+                            + np.maximum(temperature_min - temperature_operative_series, 0).sum())
+    comfort_penalty = comfort_penalty_base + comfort_penalty_soft + comfort_penalty_hard
     return power_penalty_weight * power_penalty + comfort_penalty_weight * comfort_penalty
 
 
 def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, delta_time,
-                 power_weight_curve, temperature_min, temperature_max, substeps_per_actuation):
+                 power_weight_curve, temperature_min, temperature_max, substeps_per_actuation,
+                 comfort_penalty_weight=1.e9):
     shoebox_copy = copy.deepcopy(shoebox)
     temperature_operative_series = model(shoebox_copy, heating_strategy, temperature_outside_series, delta_time, substeps_per_actuation)
     # return cost_function_temperature_setpoint(temperature_operative_series, temperature_setpoint)
     return cost_function_demand_response(np.repeat(heating_strategy, substeps_per_actuation), power_weight_curve,
-                                         temperature_operative_series, temperature_max, temperature_min)
+                                         temperature_operative_series, temperature_max, temperature_min,
+                                         comfort_penalty_weight=comfort_penalty_weight)
 
 
 def get_load_curve(filename="Lastprofile VDEW_alle.csv", key="Haushalt_Winter"):
@@ -143,7 +139,7 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
     load_curve[new_time1] = load_curve.iloc[-1]
     load_curve = load_curve.resample(f'{resample_in_minutes}min').mean()
     load_curve = load_curve.interpolate()
-    load_curve = load_curve[:-1] # kick last one
+    load_curve = load_curve[:-1]  # kick last one
     peak = load_curve.max()
     return load_curve / peak
 
@@ -256,17 +252,16 @@ def post_proc(postproc_dict, actuation_sequence, power_weight_curve):
     x = 0
 
 
-def main_script():
-    # Model parameters
+def get_basic_parameters():
     temperature_outside = 7
     simulated_time = 24 * 3600
-    substeps_per_actuation = 60
     actuationstep_in_minutes = 60
+    substeps_per_actuation = actuationstep_in_minutes  # make one simulationstep per minute
     simulationstep_in_minutes = -1
     if actuationstep_in_minutes % substeps_per_actuation == 0:
         simulationstep_in_minutes = actuationstep_in_minutes / substeps_per_actuation
     else:
-        print("does not compute - beep beep")
+        print("actuationstep_in_minutes % substeps_per_actuation != 0")
         return 1
 
     time_delta = 60 * simulationstep_in_minutes
@@ -286,27 +281,71 @@ def main_script():
     heating_power_initial = np.array([1000] * num_actuation_steps)
 
     lengths = (5, 5, 5)
+    return {"lengths": lengths,
+            "bounds": bounds,
+            "heating_power_initial": heating_power_initial,
+            "temperature_outside_series": temperature_outside_series,
+            "temperature_min": temperature_min,
+            "temperature_max": temperature_max,
+            "simulationstep_in_minutes": simulationstep_in_minutes,
+            "substeps_per_actuation": substeps_per_actuation,
+            "time_delta": time_delta,
+            "num_timesteps": num_timesteps,
+            "num_actuation_steps": num_actuation_steps,
+            "power_weight_curve": power_weight_curve}
+
+
+def main_script():
+    # Model parameters
+    basic_parameter_dict = get_basic_parameters()
+    temperature_outside_series = basic_parameter_dict["temperature_outside_series"]
+    time_delta = basic_parameter_dict["time_delta"]
+    power_weight_curve = basic_parameter_dict["power_weight_curve"]
+    heating_power_initial = basic_parameter_dict["heating_power_initial"]
+    bounds = basic_parameter_dict["bounds"]
+    temperature_min = basic_parameter_dict["temperature_min"]
+    temperature_max = basic_parameter_dict["temperature_max"]
+    substeps_per_actuation = basic_parameter_dict["substeps_per_actuation"]
+    lengths = basic_parameter_dict["lengths"]
+
     # Optimize control actions
-
-    print("u-value, peak alignment factor, total energy turnover, grid burden, computation time in s")
+    print("u-value, thermal capacity, comfort penalty weight, peak alignment factor, total energy turnover, grid burden, computation time in s")
     # print("thermal capacity, peak alignment factor, total energy turnover, grid burden, computation time in s")
-    df_results = pd.DataFrame(columns=["u-value", "peak alignment factor", "total energy turnover", "grid burden", "computation time"])
-    # df_results = pd.DataFrame(columns=["thermal capacity", "peak alignment factor", "total energy turnover", "grid burden", "computation time"])
-    u_values = [0.1, .15, 0.2, .25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
-    thermal_capacities = 1.e6 * np.array([1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.])
-    u_values = [0.3]
+    df_results = pd.DataFrame(columns=["u-value", "thermal capacity", "comfort penaltyweight",
+                                       "peak alignment factor", "total energy turnover", "grid burden",
+                                       "computation time"])
 
-    # for i in range(len(thermal_capacities)):
-    for i in range(len(u_values)):
-        u_value = u_values[i]
-        # therm_sto = thermal_capacities[i]
+    # df_results = pd.DataFrame(columns=["thermal capacity", "peak alignment factor", "total energy turnover", "grid burden", "computation time"])
+    # u_values = [0.1, .15, 0.2, .25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
+    thermal_capacities = 1.e6 * np.array([1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.])
+    # thermal_capacities = 1.e6 * np.array([1., 2.])
+    # u_values = [0.3]
+
+    # comfort_penatly_weights = [1.e5, 1.e6, 1.e7, 1.e8, 1.e9, 1.e10]
+    comfort_penatly_weight = 1.e7
+    # therm_sto = 3.6e6
+    u_value = .3
+    # filename_suffix = f"u{u_value}_tc{therm_sto:.1e}_cpwV"
+    # filename_suffix = f"uV_tc{therm_sto:.1e}_cpw{comfort_penatly_weight:.1e}"
+    filename_suffix = f"u{u_value}_tcV_cpw{comfort_penatly_weight:.1e}"
+    # df_actuation_results = pd.DataFrame(columns=comfort_penatly_weights)
+    # df_actuation_results = pd.DataFrame(columns=u_values)
+    df_actuation_results = pd.DataFrame(columns=thermal_capacities)
+
+    for i in range(len(thermal_capacities)):
+    # for i in range(len(u_values)):
+    # for i in range(len(comfort_penatly_weights)):
+    #     u_value = u_values[i]
+        therm_sto = thermal_capacities[i]
+        # comfort_penatly_weight = comfort_penatly_weights[i]
+
         start_time = time.time()
-        shoebox = ShoeBox(lengths=lengths, u_value=u_value)
+        shoebox = ShoeBox(lengths=lengths, u_value=u_value, therm_sto=therm_sto)
         # shoebox = ShoeBox(lengths=lengths, therm_sto=therm_sto)
 
-        minimize_results = minimize(cost_wrapper, heating_power_initial,  #method="Powell",
+        minimize_results = minimize(cost_wrapper, heating_power_initial,  # method="Powell",
                                     args=(shoebox, temperature_outside_series, time_delta, power_weight_curve,
-                                          temperature_min, temperature_max, substeps_per_actuation),
+                                          temperature_min, temperature_max, substeps_per_actuation, comfort_penatly_weight),
                                     bounds=bounds)
 
         actuation_sequence = minimize_results.x
@@ -319,24 +358,88 @@ def main_script():
                                           substeps_per_actuation=substeps_per_actuation)
         computation_time = time.time() - start_time
 
-        df_results.loc[i] = [u_value,
-        # df_results.loc[i] = [therm_sto,
+        # df_results = pd.DataFrame(columns=["u-value", "thermal capacity", "comfort penaltyweight",
+        #                                    "peak alignment factor", "total energy turnover", "grid burden",
+        #                                    "computation time"])
+
+        df_results.loc[i] = [u_value, therm_sto, comfort_penatly_weight,
                              postproc_dict['peak_alignment_factor'],
                              postproc_dict['total_energy_turnover'],
                              postproc_dict['grid_burden'],
                              computation_time]
 
-        print(f"{u_value}, "
-        # print(f"{therm_sto}, "
-              f"{postproc_dict['peak_alignment_factor']:.3f}, "
-              f"{postproc_dict['total_energy_turnover']:.3f}, "
-              f"{postproc_dict['grid_burden']:.3f}, "
+        df_actuation_results.iloc[:, i] = actuation_sequence
+
+        print(f"{u_value}, {therm_sto}, {comfort_penatly_weight:.1e}, "
+              f"{postproc_dict['peak_alignment_factor']:.4f}, "
+              f"{postproc_dict['total_energy_turnover']:.3e}, "
+              f"{postproc_dict['grid_burden']:.3e}, "
               f"{computation_time:.3f}")
 
     df_results.to_csv('shoebox_results.csv')
-    post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
+    df_actuation_results.to_csv(f"actuation_results_{filename_suffix}.csv")
+    # post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
+
+
+def plot_peak_alignment(filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv"):
+    pass
+
+def pp_script(filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", plot_column_index=None, plot_peak_alignment=False,
+              x_label=None):
+    df = pd.read_csv(filename, index_col=0)
+    temperature_outside_series = get_basic_parameters()["temperature_outside_series"]
+    time_delta = get_basic_parameters()["time_delta"]
+    power_weight_curve = get_basic_parameters()["power_weight_curve"]
+    temperature_min = get_basic_parameters()["temperature_min"]
+    temperature_max = get_basic_parameters()["temperature_max"]
+    substeps_per_actuation = get_basic_parameters()["substeps_per_actuation"]
+    lengths = get_basic_parameters()["lengths"]
+
+    if plot_column_index is not None:
+        shoebox_fresh = ShoeBox(lengths)
+        actuation_sequence = df[df.columns[plot_column_index]].array
+        # actseq = actuation_sequence.copy()
+        postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
+                                          temperature_outside=temperature_outside_series, time_delta=time_delta,
+                                          power_weight_curve=power_weight_curve,
+                                          temperature_min=temperature_min, temperature_max=temperature_max,
+                                          substeps_per_actuation=substeps_per_actuation)
+
+        print("peak alignment factor, total energy turnover, grid burden")
+
+        print(f"{postproc_dict['peak_alignment_factor']:.4f}, "
+              f"{postproc_dict['total_energy_turnover']:.3e}, "
+              f"{postproc_dict['grid_burden']:.3e}")
+
+        post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
+
+    if plot_peak_alignment:
+        x_vals = list()
+        y_vals = list()
+        for col in df.columns:
+            x_vals.append(float(col))
+            shoebox_fresh = ShoeBox(lengths)
+            actuation_sequence = df[col].array
+            postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
+                                              temperature_outside=temperature_outside_series, time_delta=time_delta,
+                                              power_weight_curve=power_weight_curve,
+                                              temperature_min=temperature_min, temperature_max=temperature_max,
+                                              substeps_per_actuation=substeps_per_actuation)
+            y_vals.append(postproc_dict["peak_alignment_factor"])
+        plt.plot(x_vals, y_vals)
+        plt.xlabel(x_label)
+        plt.ylabel("peak alignment factor")
+        plt.grid(True)
+        plt.savefig(filename[:-4] + ".pdf", format="pdf")
+        plt.show(block=True)
+    pass
 
 
 if __name__ == "__main__":
     # alternative_main()
-    main_script()
+    # pp_script("20250509_actuation_results_u0.3_tc3.6e+06_cpwV.csv")
+    pp_script(filename="20250509_actuation_results_uV_tc3.6e+06_cpw1.0e+07.csv", plot_peak_alignment=True,
+              x_label="u-value in W/m2k")
+    # pp_script(filename="20250509_actuation_results_u0.3_tcV_cpw1.0e+07.csv", plot_peak_alignment=True,
+    #           x_label="thermal capacity in J/K")
+    # main_script()
