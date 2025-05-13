@@ -77,26 +77,6 @@ def cost_function_temperature_setpoint(T_history, T_setpoint):
     return np.sum((T_history[1:] - T_setpoint) ** 2)
 
 
-def cost_function_demand_response_single3(heating_power, power_weight,
-                                          temperature_operative, temperature_max, temperature_min,
-                                          power_penalty_weight=1., comfort_penalty_weight=1.e9):
-    power_penalty = heating_power * power_weight
-    temperature_mid = 0.5 * (temperature_max + temperature_min)
-    comfort_penalty = np.power((temperature_operative - temperature_mid) / (temperature_max - temperature_mid), 64)
-    # return power_penalty_weight * power_penalty + comfort_penalty_weight * comfort_penalty
-    return (power_penalty_weight * power_penalty, comfort_penalty_weight * comfort_penalty)
-
-
-def cost_function_demand_response_single(heating_power, power_weight,
-                                         temperature_operative, temperature_max, temperature_min,
-                                         power_penalty_weight=1., comfort_penalty_weight=1.e9):
-    power_penalty = heating_power * power_weight
-    comfort_penalty = (max(temperature_operative - temperature_max, 0)
-                       + max(temperature_min - temperature_operative, 0))
-    # return power_penalty_weight * power_penalty + comfort_penalty_weight * comfort_penalty
-    return (power_penalty_weight * power_penalty, comfort_penalty_weight * comfort_penalty)
-
-
 def cost_function_demand_response3(heating_strategy, power_weight_curve,
                                    temperature_operative_series, temperature_max, temperature_min,
                                    power_penalty_weight=1., comfort_penalty_weight=1.e5):
@@ -118,33 +98,20 @@ def cost_function_demand_response3(heating_strategy, power_weight_curve,
     return power_penalty_weight * power_penalty + comfort_penalty_weight * comfort_penalty
 
 
-def cost_function_demand_response2(heating_strategy, power_weight_curve,
-                                   temperature_operative_series, temperature_max, temperature_min,
-                                   power_penalty_weight=1., comfort_penalty_weight=1.e9):
-    # return sum([cost_function_demand_response_single(heating_strategy[i], power_weight_curve[i],
-    #                                                  temperature_operative_series[i], temperature_max, temperature_min)
-    #            for i in range(heating_strategy.size)])
-    mysum = 0
-    power_weight_curve_array = power_weight_curve.array
-    for i in range(heating_strategy.size):
-        cost_temp = cost_function_demand_response_single(heating_strategy[i], power_weight_curve_array[i],
-                                                         temperature_operative_series[i], temperature_max, temperature_min,
-                                                         power_penalty_weight, comfort_penalty_weight)
-        mysum += sum(cost_temp)
-    return mysum
-
-
 def cost_function_demand_response(heating_strategy, power_weight_curve,
                                   temperature_operative_series, temperature_max, temperature_min,
                                   power_penalty_weight=1., comfort_penalty_weight=1.e5):
-    power_penalty = np.dot(heating_strategy, power_weight_curve)
-    comfort_penalty_base = (temperature_operative_series - 0.5 * (temperature_max - temperature_min)).sum() / comfort_penalty_weight
-    comfort_penalty_soft = (np.maximum(temperature_operative_series - temperature_max - .1, 0).sum()
-                            + np.maximum(temperature_min + .1 - temperature_operative_series, 0).sum()) / np.sqrt(comfort_penalty_weight)
-    comfort_penalty_hard = (np.maximum(temperature_operative_series - temperature_max, 0).sum()
-                            + np.maximum(temperature_min - temperature_operative_series, 0).sum())
-    comfort_penalty = comfort_penalty_base + comfort_penalty_soft + comfort_penalty_hard
-    return power_penalty_weight * power_penalty + comfort_penalty_weight * comfort_penalty
+    power_penalty_array = heating_strategy * power_weight_curve
+    comfort_penalty_base_array = (temperature_operative_series - 0.5 * (temperature_max - temperature_min)) / comfort_penalty_weight
+    comfort_penalty_soft_array = (np.maximum(temperature_operative_series - temperature_max - .1, 0)
+                                  + np.maximum(temperature_min + .1 - temperature_operative_series, 0)) / np.sqrt(comfort_penalty_weight)
+    comfort_penalty_hard_array = (np.maximum(temperature_operative_series - temperature_max, 0)
+                                  + np.maximum(temperature_min - temperature_operative_series, 0))
+    comfort_penalty_array = comfort_penalty_base_array + comfort_penalty_soft_array + comfort_penalty_hard_array
+
+    return {"cost_total": power_penalty_weight * power_penalty_array.sum() + comfort_penalty_weight * comfort_penalty_array.sum(),
+            "cost_power": power_penalty_weight * power_penalty_array,
+            "cost_comfort": comfort_penalty_weight * comfort_penalty_array}
 
 
 def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, delta_time,
@@ -155,7 +122,7 @@ def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, delta_ti
     # return cost_function_temperature_setpoint(temperature_operative_series, temperature_setpoint)
     return cost_function_demand_response(np.repeat(heating_strategy, substeps_per_actuation), power_weight_curve,
                                          temperature_operative_series, temperature_max, temperature_min,
-                                         comfort_penalty_weight=comfort_penalty_weight)
+                                         comfort_penalty_weight=comfort_penalty_weight)["cost_total"]
 
 
 def get_load_curve(filename="Lastprofile VDEW_alle.csv", key="Haushalt_Winter"):
@@ -209,10 +176,18 @@ def get_postproc_info(shoebox, actuation_sequence, temperature_outside, time_del
         temperature_operative[k + 1] = shoebox.get_operative_temperature()
         temperature_supply[k + 1] = shoebox.temperature_supply
         temperature_surface[k + 1] = shoebox.get_surface_temperature()
-        cost_power[k + 1], cost_comfort[k + 1] = cost_function_demand_response_single(u, power_weight_curve.iloc[k],
-                                                                                      temperature_operative[k + 1],
-                                                                                      temperature_max, temperature_min,
-                                                                                      comfort_penalty_weight=comfort_penalty_weight)
+        # cost_power[k + 1], cost_comfort[k + 1] = cost_function_demand_response_single(u, power_weight_curve.iloc[k],
+        #                                                                               temperature_operative[k + 1],
+        #                                                                               temperature_max, temperature_min,
+        #                                                                               comfort_penalty_weight=comfort_penalty_weight)
+
+    cost_power = cost_function_demand_response(actuation_sequence, power_weight_curve,
+                                               temperature_operative, temperature_max, temperature_min,
+                                               comfort_penalty_weight=comfort_penalty_weight)["cost_power"]
+    cost_comfort = cost_function_demand_response(actuation_sequence, power_weight_curve,
+                                                 temperature_operative, temperature_max, temperature_min,
+                                                 comfort_penalty_weight=comfort_penalty_weight)["cost_comfort"]
+
     return {"temperature_air": temperature_air,
             "temperature_storage": temperature_storage,
             "temperature_operative": temperature_operative,
@@ -225,7 +200,7 @@ def get_postproc_info(shoebox, actuation_sequence, temperature_outside, time_del
             "peak_alignment_factor": peak_alignment_factor}
 
 
-def array_to_time_series(array, step_in_minutes=5, start_time="2025-04-29 00:00"):
+def array_to_time_series(array, step_in_minutes=1, start_time="2025-04-29 00:00"):
     array = np.array(array)
     step = pd.Timedelta(minutes=step_in_minutes)
     index = pd.date_range(start=pd.Timestamp(start_time), periods=len(array), freq=step)
@@ -342,10 +317,10 @@ def main_script():
     lengths = basic_parameter_dict["lengths"]
 
     # Optimize control actions
-    print("u-value, thermal capacity, comfort penalty weight, peak alignment factor, total energy turnover, grid burden, computation time in s")
+    print("u-value, thermal capacity, comfort penalty weight, peak alignment factor, total energy turnover, grid burden, cost power, cost comfort, computation time in s")
     # print("thermal capacity, peak alignment factor, total energy turnover, grid burden, computation time in s")
     df_results = pd.DataFrame(columns=["u-value", "thermal capacity", "comfort penaltyweight",
-                                       "peak alignment factor", "total energy turnover", "grid burden",
+                                       "peak alignment factor", "total energy turnover", "grid burden", "cost power", "cost comfort",
                                        "computation time"])
 
     # df_results = pd.DataFrame(columns=["thermal capacity", "peak alignment factor", "total energy turnover", "grid burden", "computation time"])
@@ -401,6 +376,8 @@ def main_script():
                              postproc_dict['peak_alignment_factor'],
                              postproc_dict['total_energy_turnover'],
                              postproc_dict['grid_burden'],
+                             postproc_dict['cost_power'].sum(),
+                             postproc_dict['cost_comfort'].sum(),
                              computation_time]
 
         df_actuation_results.iloc[:, i] = actuation_sequence
@@ -409,6 +386,8 @@ def main_script():
               f"{postproc_dict['peak_alignment_factor']:.4f}, "
               f"{postproc_dict['total_energy_turnover']:.3e}, "
               f"{postproc_dict['grid_burden']:.3e}, "
+              f"{postproc_dict['cost_power'].sum():.3e}, "
+              f"{postproc_dict['cost_comfort'].sum():.3e}, "
               f"{computation_time:.3f}")
 
     df_results.to_csv('shoebox_results.csv')
@@ -416,8 +395,7 @@ def main_script():
     post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
 
 
-def pp_script(filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", plot_peak_alignment=False,
-              x_label=None):
+def plot_peak_alignment(filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", x_label=None):
     df = pd.read_csv(filename, index_col=0)
     temperature_outside_series = get_basic_parameters()["temperature_outside_series"]
     time_delta = get_basic_parameters()["time_delta"]
@@ -449,11 +427,40 @@ def pp_script(filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", plo
     pass
 
 
+def pp_from_file(filename, column_index, shoebox, comfort_penalty_weight):
+    df = pd.read_csv(filename, index_col=0)
+    temperature_outside_series = get_basic_parameters()["temperature_outside_series"]
+    time_delta = get_basic_parameters()["time_delta"]
+    power_weight_curve = get_basic_parameters()["power_weight_curve"]
+    temperature_min = get_basic_parameters()["temperature_min"]
+    temperature_max = get_basic_parameters()["temperature_max"]
+    substeps_per_actuation = get_basic_parameters()["substeps_per_actuation"]
+    # lengths = get_basic_parameters()["lengths"]
+    actuation_sequence = df.iloc[:, column_index].array
+    postproc_dict = get_postproc_info(shoebox=shoebox, actuation_sequence=actuation_sequence,
+                                      temperature_outside=temperature_outside_series, time_delta=time_delta,
+                                      power_weight_curve=power_weight_curve,
+                                      temperature_min=temperature_min, temperature_max=temperature_max,
+                                      substeps_per_actuation=substeps_per_actuation, comfort_penalty_weight=comfort_penalty_weight)
+    post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
+
+
 if __name__ == "__main__":
     # alternative_main()
     # pp_script("20250509_actuation_results_u0.3_tc3.6e+06_cpwV.csv")
     # pp_script(filename="20250509_actuation_results_uV_tc3.6e+06_cpw1.0e+07.csv", plot_column_index=0, plot_peak_alignment=False,
     #           x_label="u-value in W/m2k")
-    # pp_script(filename="20250509_actuation_results_u0.3_tcV_cpw1.0e+07.csv", plot_peak_alignment=True,
-    #           x_label="thermal capacity in J/K")
+    # plot_peak_alignment(filename="20250509_actuation_results_u0.3_tcV_cpw1.0e+07.csv", plot_peak_alignment=True,
+    #                     x_label="thermal capacity in J/K")
+
+    # shoebox = ShoeBox(lengths=(5, 5, 5), u_value=.3, therm_sto=3.6e6)
+    # pp_from_file(filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", column_index=2, shoebox=shoebox, comfort_penalty_weight=1000.)
+
+    # weight_curve = get_consumption_weight_curve(resample_in_minutes=1)
+    # plt.plot(weight_curve)
+    # plt.grid()
+    # ax = plt.gca()
+    # ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    # plt.show(block=True)
+
     main_script()
