@@ -2,11 +2,13 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow.keras.optimizers import Adam
 from collections import deque
 import random
 import pandas as pd
 import matplotlib.pyplot as plt
 import time
+
 
 def set_global_seed(seed=0):
     np.random.seed(seed)
@@ -16,10 +18,13 @@ def set_global_seed(seed=0):
 
 # Environment
 class SmartBuildingEnv:
-    def __init__(self, forecast_len=8, prices=None):
+    def __init__(self, forecast_len=8, init_temperature=22, temperature_min=20, temperature_max=24, prices=None):
         self.forecast_len = forecast_len
         self.max_steps = 24  # One episode = one day = 24 hours
         self.heating_levels = [0.0, 1.0, 2.0]
+        self.init_temperature = init_temperature
+        self.temperature_min = temperature_min
+        self.temperature_max = temperature_max
 
         # Fixed 24-hour price profile known in advance
         if prices is None:
@@ -30,8 +35,8 @@ class SmartBuildingEnv:
 
     def reset(self):
         self.step_count = 0
-        self.indoor_temp = 20.0
-        self.outdoor_temp = 5.0
+        self.indoor_temp = self.init_temperature
+        self.outdoor_temp = 5
         self.prices = self.daily_prices  # Use the same fixed 24-hour profile
         self.state = self._get_state()
         return self.state
@@ -45,7 +50,8 @@ class SmartBuildingEnv:
         full_prices = np.concatenate((self.prices, self.prices))  # Ensure safe indexing
         forecast = full_prices[start:end]
 
-        return np.array([self.indoor_temp, self.prices[self.step_count], *forecast])
+        # return np.array([self.indoor_temp, *forecast])
+        return np.array([self.indoor_temp])
 
     def step(self, action):
         heat_power = self.heating_levels[action]
@@ -56,30 +62,34 @@ class SmartBuildingEnv:
         energy_cost = price * heat_power
 
         comfort_penalty = 0.0
-        if self.indoor_temp < 19:
-            comfort_penalty = -10
-        elif self.indoor_temp > 24:
-            comfort_penalty = -5
+        temperature_mid = (self.temperature_min + self.temperature_max) / 2
+        comfort_penalty += (self.indoor_temp - temperature_mid) * 0.1
+        if self.indoor_temp < self.temperature_min:
+            comfort_penalty += (self.temperature_min - self.indoor_temp) * 10
+        if self.indoor_temp > self.temperature_max:
+            comfort_penalty += (self.indoor_temp - self.temperature_max) * 10
 
-        reward = -energy_cost + comfort_penalty
+        reward = -energy_cost - comfort_penalty
 
         self.step_count = (self.step_count + 1) % self.max_steps
 
-        done = self.step_count >= self.max_steps
-        return self._get_state(), reward, done
+        # done = self.step_count >= self.max_steps
+        return self._get_state(), reward
 
 
 # DQN Agent
 class DQNAgent:
-    def __init__(self, state_size, action_size, num_layers=2, neurons_per_layer=24):
+    def __init__(self, state_size, action_size, num_layers=2, neurons_per_layer=24, learning_rate=0.001,
+                 epsilon_decay=0.99, batch_size=32, memory_size=256):
         self.state_size = state_size
         self.action_size = action_size
-        self.memory = deque(maxlen=2000)
+        self.memory = deque(maxlen=memory_size)
         self.gamma = 0.95
+        self.learning_rate = learning_rate
         self.epsilon = 1.0
         self.epsilon_min = 0.01
-        self.epsilon_decay = 0.9
-        self.batch_size = 32
+        self.epsilon_decay = epsilon_decay
+        self.batch_size = batch_size
         self.model = self._build_model(num_layers, neurons_per_layer)
         self.target_model = keras.models.clone_model(self.model)
         self.target_model.set_weights(self.model.get_weights())
@@ -94,12 +104,12 @@ class DQNAgent:
         for _ in range(num_layers):
             model.add(layers.Dense(neurons_per_layer, activation='relu'))
         model.add(layers.Dense(output_dim, activation='linear'))
-        model.compile(optimizer='adam', loss='mse')
-
+        # model.compile(optimizer='adam', loss='mse')
+        model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss='mse')
         return model
 
-    def remember(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done))
+    def remember(self, state, action, reward, next_state):
+        self.memory.append((state, action, reward, next_state))
 
     def act(self, state):
         if np.random.rand() <= self.epsilon:
@@ -111,17 +121,29 @@ class DQNAgent:
         if len(self.memory) < self.batch_size:
             return
         minibatch = random.sample(self.memory, self.batch_size)
-        for state, action, reward, next_state, done in minibatch:
-            target = self.model.predict(state[np.newaxis], verbose=0)
-            if done:
-                target[0][action] = reward
-            else:
-                t = self.target_model.predict(next_state[np.newaxis], verbose=0)
-                target[0][action] = reward + self.gamma * np.amax(t[0])
-            self.model.fit(state[np.newaxis], target, epochs=1, verbose=0)
+        # for state, action, reward, next_state in minibatch:
+        #     target = self.model.predict(state[np.newaxis], verbose=0)
+        #     t = self.target_model.predict(next_state[np.newaxis], verbose=0)
+        #     target[0][action] = reward + self.gamma * np.amax(t[0])
+        #     self.model.fit(state[np.newaxis], target, epochs=1, verbose=0)
 
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+        # Vectorized approach
+        states = np.array([s for s, _, _, _ in minibatch])
+        next_states = np.array([ns for _, _, _, ns in minibatch])
+
+        # Predict Q-values for all states and next states at once
+        q_values = self.model.predict(states, verbose=0)
+        q_next = self.target_model.predict(next_states, verbose=0)
+
+        # Compute updated Q-values
+        for i, (state, action, reward, next_state) in enumerate(minibatch):
+            q_values[i][action] = reward + self.gamma * np.amax(q_next[i])
+
+        # Train in one batch
+        self.model.fit(states, q_values, epochs=1, verbose=0)
+
+
+        self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
 
     def update_target_model(self):
         self.target_model.set_weights(self.model.get_weights())
@@ -144,27 +166,26 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
     return load_curve / peak
 
 
-def training(file_model="chatgpt_deep_q_building.keras", num_episodes=300):
-
+def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.keras", num_episodes=300, learning_rate=0.001):
     start_time = time.time()
     prices = get_consumption_weight_curve(resample_in_minutes=60)
     env = SmartBuildingEnv(prices=prices.array)
     state_size = env.reset().shape[0]
     action_size = 3
-    agent = DQNAgent(state_size, action_size, num_layers=2, neurons_per_layer=24)
+    epsilon_decay = np.pow(.05, 2 / num_episodes)
+    agent = DQNAgent(state_size, action_size, num_layers=num_layers, neurons_per_layer=neurons_per_layer,
+                     epsilon_decay=epsilon_decay, learning_rate=learning_rate)
 
     for e in range(num_episodes):
+
         state = env.reset()
         total_reward = 0
-
         for _ in range(env.max_steps):
             action = agent.act(state)
-            next_state, reward, done = env.step(action)
-            agent.remember(state, action, reward, next_state, done)
+            next_state, reward = env.step(action)
+            agent.remember(state, action, reward, next_state)
             state = next_state
             total_reward += reward
-            if done:
-                break
 
         agent.replay()
         agent.update_target_model()
@@ -175,11 +196,11 @@ def training(file_model="chatgpt_deep_q_building.keras", num_episodes=300):
     agent.model.save(file_model)
 
 
-def test_model(file_model="chatgpt_deep_q_building.keras"):
+def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.keras"):
     env = SmartBuildingEnv()
     state_size = env.reset().shape[0]
     action_size = len(env.heating_levels)
-    agent = DQNAgent(state_size, action_size)
+    agent = DQNAgent(state_size, action_size, num_layers=num_layers, neurons_per_layer=neurons_per_layer)
     agent.model = keras.models.load_model(file_model)
     agent.epsilon = 0
     rewards = np.zeros(24 * 4)
@@ -189,11 +210,11 @@ def test_model(file_model="chatgpt_deep_q_building.keras"):
     state = env.reset()
     for i in range(24 * 4):
         actions[i] = agent.act(state)
-        state, rewards[i], done = env.step(actions[i])
+        state, rewards[i] = env.step(actions[i])
         temperatures[i] = state[0]
-        price = state[1]
-        forecast = state[2:]
+        prices = state[1:]
 
+    print(f"rewards over 24 hours: {sum(rewards[:24]):.2f}")
     plt.plot(temperatures, label='Temperature')
     plt.plot(actions, label='Heating level')
     plt.plot(rewards, label='rewards')
@@ -202,8 +223,13 @@ def test_model(file_model="chatgpt_deep_q_building.keras"):
     plt.show(block=True)
 
 
-# Training loop
-if __name__ == '__main__':
+def main():
+    num_layers = 1
+    neurons_per_layer = 2
     set_global_seed()
-    # training(num_episodes=30)
-    test_model()
+    training(num_layers, neurons_per_layer, num_episodes=100, learning_rate=0.05)
+    test_model(num_layers, neurons_per_layer)
+
+
+if __name__ == '__main__':
+    main()
