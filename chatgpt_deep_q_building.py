@@ -51,11 +51,14 @@ class SmartBuildingEnv:
         forecast = full_prices[start:end]
 
         # return np.array([self.indoor_temp, *forecast])
-        return np.array([self.indoor_temp])
+        return np.array([self._normalize_temperature(self.indoor_temp)])
+
+    def _normalize_temperature(self, temperature):
+        return (temperature - (self.temperature_min + self.temperature_max) / 2) / ((self.temperature_max - self.temperature_min)/2)
 
     def step(self, action):
         heat_power = self.heating_levels[action]
-        heat_loss = (self.indoor_temp - self.outdoor_temp) * 0.05
+        heat_loss = (self.indoor_temp - self.outdoor_temp) * 0.075
         self.indoor_temp += heat_power - heat_loss
 
         price = self.prices[self.step_count]
@@ -63,24 +66,30 @@ class SmartBuildingEnv:
 
         comfort_penalty = 0.0
         temperature_mid = (self.temperature_min + self.temperature_max) / 2
-        comfort_penalty += (self.indoor_temp - temperature_mid) * 0.1
-        if self.indoor_temp < self.temperature_min:
-            comfort_penalty += (self.temperature_min - self.indoor_temp) * 10
-        if self.indoor_temp > self.temperature_max:
-            comfort_penalty += (self.indoor_temp - self.temperature_max) * 10
+        comfort_penalty += np.abs(self.indoor_temp - temperature_mid) * 1.
+        # if self.indoor_temp < self.temperature_min:
+        #     comfort_penalty += (self.temperature_min - self.indoor_temp) * 10
+        # if self.indoor_temp > self.temperature_max:
+        #     comfort_penalty += (self.indoor_temp - self.temperature_max) * 10
 
-        reward = -energy_cost - comfort_penalty
+        # reward = -energy_cost - comfort_penalty
+        reward = -comfort_penalty
 
-        self.step_count = (self.step_count + 1) % self.max_steps
+        state = self._get_state()
 
-        # done = self.step_count >= self.max_steps
-        return self._get_state(), reward
+        self.step_count += 1
+        done = False
+        if self.step_count >= self.max_steps:
+            done = True
+            self.reset()
+
+        return state, reward, done
 
 
 # DQN Agent
 class DQNAgent:
     def __init__(self, state_size, action_size, num_layers=2, neurons_per_layer=24, learning_rate=0.001,
-                 epsilon_decay=0.99, batch_size=32, memory_size=256):
+                 epsilon_decay=0.99, batch_size=32, memory_size=1024):
         self.state_size = state_size
         self.action_size = action_size
         self.memory = deque(maxlen=memory_size)
@@ -104,8 +113,8 @@ class DQNAgent:
         for _ in range(num_layers):
             model.add(layers.Dense(neurons_per_layer, activation='relu'))
         model.add(layers.Dense(output_dim, activation='linear'))
-        # model.compile(optimizer='adam', loss='mse')
-        model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss='mse')
+        model.compile(optimizer='adam', loss='mse')
+        # model.compile(optimizer=Adam(learning_rate=self.learning_rate), loss='mse')
         return model
 
     def remember(self, state, action, reward, next_state):
@@ -142,7 +151,6 @@ class DQNAgent:
         # Train in one batch
         self.model.fit(states, q_values, epochs=1, verbose=0)
 
-
         self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
 
     def update_target_model(self):
@@ -172,20 +180,23 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
     env = SmartBuildingEnv(prices=prices.array)
     state_size = env.reset().shape[0]
     action_size = 3
-    epsilon_decay = np.pow(.05, 2 / num_episodes)
+    epsilon_decay = np.pow(.1, 2 / num_episodes)
     agent = DQNAgent(state_size, action_size, num_layers=num_layers, neurons_per_layer=neurons_per_layer,
                      epsilon_decay=epsilon_decay, learning_rate=learning_rate)
+    # agent.epsilon = 0
+    # agent.epsilon_min = 0
 
     for e in range(num_episodes):
-
         state = env.reset()
         total_reward = 0
         for _ in range(env.max_steps):
             action = agent.act(state)
-            next_state, reward = env.step(action)
+            next_state, reward, done = env.step(action)
             agent.remember(state, action, reward, next_state)
             state = next_state
             total_reward += reward
+            if done:
+                break
 
         agent.replay()
         agent.update_target_model()
@@ -203,14 +214,15 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
     agent = DQNAgent(state_size, action_size, num_layers=num_layers, neurons_per_layer=neurons_per_layer)
     agent.model = keras.models.load_model(file_model)
     agent.epsilon = 0
-    rewards = np.zeros(24 * 4)
-    temperatures = np.zeros(24 * 4)
-    actions = np.zeros(24 * 4, dtype=int)
+    agent.epsilon_min = 0
+    rewards = np.zeros(24)
+    temperatures = np.zeros(24)
+    actions = np.zeros(24, dtype=int)
 
     state = env.reset()
-    for i in range(24 * 4):
+    for i in range(24):
         actions[i] = agent.act(state)
-        state, rewards[i] = env.step(actions[i])
+        state, rewards[i], done = env.step(actions[i])
         temperatures[i] = state[0]
         prices = state[1:]
 
@@ -224,10 +236,10 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
 
 
 def main():
-    num_layers = 1
-    neurons_per_layer = 2
+    num_layers = 2
+    neurons_per_layer = 16
     set_global_seed()
-    training(num_layers, neurons_per_layer, num_episodes=100, learning_rate=0.05)
+    training(num_layers, neurons_per_layer, num_episodes=20)
     test_model(num_layers, neurons_per_layer)
 
 
