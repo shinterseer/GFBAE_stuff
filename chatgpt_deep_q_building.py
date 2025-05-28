@@ -8,7 +8,7 @@ import random
 import pandas as pd
 import matplotlib.pyplot as plt
 import time
-
+import copy
 
 def set_global_seed(seed=0):
     np.random.seed(seed)
@@ -51,7 +51,8 @@ class SmartBuildingEnv:
         forecast = full_prices[start:end]
 
         # return np.array([self.indoor_temp, *forecast])
-        return np.array([self._normalize_temperature(self.indoor_temp)])
+        # return np.array([self._normalize_temperature(self.indoor_temp)])
+        return np.array([self.indoor_temp])
 
     def _normalize_temperature(self, temperature):
         return (temperature - (self.temperature_min + self.temperature_max) / 2) / ((self.temperature_max - self.temperature_min)/2)
@@ -139,6 +140,8 @@ class DQNAgent:
         # Vectorized approach
         states = np.array([s for s, _, _, _ in minibatch])
         next_states = np.array([ns for _, _, _, ns in minibatch])
+        actions = np.array([a for _, a, _, _ in minibatch])
+        rewards = np.array([r for _, _, r, _ in minibatch])
 
         # Predict Q-values for all states and next states at once
         q_values = self.model.predict(states, verbose=0)
@@ -147,6 +150,7 @@ class DQNAgent:
         # Compute updated Q-values
         for i, (state, action, reward, next_state) in enumerate(minibatch):
             q_values[i][action] = reward + self.gamma * np.amax(q_next[i])
+
 
         # Train in one batch
         self.model.fit(states, q_values, epochs=1, verbose=0)
@@ -236,8 +240,8 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
 
 
 def main():
-    num_layers = 2
-    neurons_per_layer = 16
+    num_layers = 1
+    neurons_per_layer = 3
     set_global_seed()
     training(num_layers, neurons_per_layer, num_episodes=20)
     test_model(num_layers, neurons_per_layer)
