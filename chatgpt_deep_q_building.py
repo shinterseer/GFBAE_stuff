@@ -50,9 +50,8 @@ class SmartBuildingEnv:
         full_prices = np.concatenate((self.prices, self.prices))  # Ensure safe indexing
         forecast = full_prices[start:end]
 
-        # return np.array([self.indoor_temp, *forecast])
-        # return np.array([self._normalize_temperature(self.indoor_temp)])
-        return np.array([self.indoor_temp])
+        return np.array([self.indoor_temp, *forecast])
+        # return np.array([self.indoor_temp])
 
     def _normalize_temperature(self, temperature):
         return (temperature - (self.temperature_min + self.temperature_max) / 2) / ((self.temperature_max - self.temperature_min)/2)
@@ -66,15 +65,15 @@ class SmartBuildingEnv:
         energy_cost = price * heat_power
 
         comfort_penalty = 0.0
-        temperature_mid = (self.temperature_min + self.temperature_max) / 2
-        comfort_penalty += np.abs(self.indoor_temp - temperature_mid) * 1.
-        # if self.indoor_temp < self.temperature_min:
-        #     comfort_penalty += (self.temperature_min - self.indoor_temp) * 10
-        # if self.indoor_temp > self.temperature_max:
-        #     comfort_penalty += (self.indoor_temp - self.temperature_max) * 10
+        # temperature_mid = (self.temperature_min + self.temperature_max) / 2
+        # comfort_penalty += np.abs(self.indoor_temp - temperature_mid) * 1.
+        if self.indoor_temp < self.temperature_min:
+            comfort_penalty += (self.temperature_min - self.indoor_temp) * 10
+        if self.indoor_temp > self.temperature_max:
+            comfort_penalty += (self.indoor_temp - self.temperature_max) * 10
 
-        # reward = -energy_cost - comfort_penalty
-        reward = -comfort_penalty
+        reward = -energy_cost * 30 - comfort_penalty
+        # reward = -comfort_penalty
 
         state = self._get_state()
 
@@ -191,6 +190,21 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
     # agent.epsilon_min = 0
 
     # fill memory of agent
+    while True:
+        state = env.reset()
+        total_reward = 0
+        for _ in range(env.max_steps):
+            action = agent.act(state)
+            next_state, reward, done = env.step(action)
+            agent.remember(state, action, reward, next_state)
+            state = next_state
+            if done:
+                break
+        memory_fill = agent.memory.__sizeof__() / agent.memory.maxlen
+        print(f'\rfilling agent memory... {memory_fill * 100 :.1f} %', end='', flush=True)
+        if memory_fill >= 1:
+            print('')
+            break
 
     for e in range(num_episodes):
         state = env.reset()
@@ -214,7 +228,8 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
 
 
 def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.keras"):
-    env = SmartBuildingEnv()
+    prices = get_consumption_weight_curve(resample_in_minutes=60)
+    env = SmartBuildingEnv(prices=prices.array)
     state_size = env.reset().shape[0]
     action_size = len(env.heating_levels)
     agent = DQNAgent(state_size, action_size, num_layers=num_layers, neurons_per_layer=neurons_per_layer)
@@ -223,6 +238,7 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
     agent.epsilon_min = 0
     rewards = np.zeros(24)
     temperatures = np.zeros(24)
+    prices = np.zeros((24, 8))
     actions = np.zeros(24, dtype=int)
 
     state = env.reset()
@@ -230,22 +246,28 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
         actions[i] = agent.act(state)
         state, rewards[i], done = env.step(actions[i])
         temperatures[i] = state[0]
-        prices = state[1:]
+        prices[i, :] = state[1:]
 
     print(f"rewards over 24 hours: {sum(rewards[:24]):.2f}")
-    plt.plot(temperatures, label='Temperature')
-    plt.plot(actions, label='Heating level')
-    plt.plot(rewards, label='rewards')
-    plt.grid()
-    plt.legend()
+    fig, axs = plt.subplots(1, 2)
+
+    axs[0].plot(temperatures, label='Temperature')
+    axs[0].plot(actions, label='Heating level')
+    axs[0].plot(rewards, label='rewards')
+    axs[0].grid()
+    axs[0].legend()
+
+    axs[1].plot(env.daily_prices, label='energy price')
+    axs[1].plot(actions, label='Heating level')
+
     plt.show(block=True)
 
 
 def main():
-    num_layers = 16
-    neurons_per_layer = 32
+    num_layers = 32
+    neurons_per_layer = 64
     set_global_seed()
-    training(num_layers, neurons_per_layer, num_episodes=1500)
+    training(num_layers, neurons_per_layer, num_episodes=40)
     test_model(num_layers, neurons_per_layer)
 
 
