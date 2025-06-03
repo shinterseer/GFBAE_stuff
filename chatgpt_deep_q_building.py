@@ -90,7 +90,7 @@ class SmartBuildingEnv:
 # DQN Agent
 class DQNAgent:
     def __init__(self, state_size, action_size, num_layers=2, neurons_per_layer=24, learning_rate=0.001,
-                 epsilon_decay=0.99, batch_size=32, memory_size=1024):
+                 epsilon_decay=0.99, batch_size=32*1024, memory_size=1024*1024):
         self.state_size = state_size
         self.action_size = action_size
         self.memory = deque(maxlen=memory_size)
@@ -190,6 +190,8 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
     # agent.epsilon = 0
     # agent.epsilon_min = 0
 
+    # fill memory of agent
+
     for e in range(num_episodes):
         state = env.reset()
         total_reward = 0
@@ -240,10 +242,10 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
 
 
 def main():
-    num_layers = 1
-    neurons_per_layer = 3
+    num_layers = 16
+    neurons_per_layer = 32
     set_global_seed()
-    training(num_layers, neurons_per_layer, num_episodes=20)
+    training(num_layers, neurons_per_layer, num_episodes=1500)
     test_model(num_layers, neurons_per_layer)
 
 
