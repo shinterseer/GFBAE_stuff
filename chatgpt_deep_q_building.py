@@ -222,11 +222,12 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
     # we want to fill the memory through training experiences fill_memory_this_many_times times
     # so we need to see how many episodes we need in a batch
     episodes_per_batch = int(np.floor(agent_memory_size * fill_memory_this_many_times / num_episode_batches / env.max_steps) + 1)
-    env_list = [SmartBuildingEnv(prices=prices.array) for _ in range(num_episode_batches)]
-    act_array = np.zeros(num_episode_batches)
-    next_state_array = np.zeros((num_episode_batches, state_size))
-    reward_array = np.zeros(num_episode_batches)
-    done_array = np.zeros(num_episode_batches)
+    env_list = [SmartBuildingEnv(prices=prices.array) for _ in range(episodes_per_batch)]
+    act_array = np.zeros(episodes_per_batch)
+    state_array = np.zeros((episodes_per_batch, state_size))
+    next_state_array = np.zeros((episodes_per_batch, state_size))
+    reward_array = np.zeros(episodes_per_batch)
+    done_array = np.zeros(episodes_per_batch)
 
     print(f'starting training with {episodes_per_batch} episodes per batch')
     global_start_time = time.time()
@@ -235,17 +236,23 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
         total_reward = 0
         # for env in env_list:
         # for i in range(episodes_per_batch):
-        for i in range(episodes_per_batch):
-            state = env.reset()
-            for _ in range(env.max_steps):
 
-                action = agent.act(state) # this would be the thing to do according to Mnih et. al.
-                next_state, reward, done = env.step(action)
-                agent.remember(state, action, reward, next_state)
-                state = next_state
-                total_reward += reward
-                if done:
-                    break
+        # state = env.reset()
+        for i in range(episodes_per_batch):
+            state_array[i, :] = env_list[i].reset()
+        for _ in range(env.max_steps):
+            act_array = agent.act_batch(state_array)
+            for i in range(episodes_per_batch):
+                # action = agent.act(state) # this would be the thing to do according to Mnih et. al.
+                next_state_array[i, :], reward_array[i], done_array[i] = env_list[i].step(act_array[i])
+                agent.remember(state_array[i, :], act_array[i], reward_array[i], next_state_array[i, :])
+                # state = next_state
+                total_reward += reward_array[i]
+
+                # need to resolve this... done will be hit in the future by some of the environments.
+                # if done:
+                #     break
+            state_array = next_state_array.copy()
 
         agent.replay()
         agent.update_target_model()
@@ -301,7 +308,7 @@ def main():
     num_layers = 32
     neurons_per_layer = 64
     set_global_seed()
-    training(num_layers, neurons_per_layer, num_episode_batches=40)
+    training(num_layers, neurons_per_layer, num_episode_batches=200)
     test_model(num_layers, neurons_per_layer)
 
 
