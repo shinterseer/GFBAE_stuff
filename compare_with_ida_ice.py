@@ -40,7 +40,12 @@ def main():
     # get_outside_temperature_mistral()
     # df_ida_ice_outside = get_outside_temperature()
     pass
+    filename_ida = '20250604_Results.csv'
+    floor_key = 'Floor - Crawl space, Deg-C'
     filename_ida = '20250603_Results.csv'
+    floor_key = 'Floor, Deg-C'
+
+
     path = 'C:/Users/shinterseer/Desktop/GFBAE/IDA_ICE_Simulation_20250521/'
     df_ida = pd.read_csv(path + filename_ida)
     base_time = pd.Timestamp('2020')
@@ -77,7 +82,7 @@ def main():
     axs[0, 0].plot(df_ida.index, df_ida['Mean air temperature, Deg-C'], label="Air temperature  IDA ICE", linewidth=0.5, color='black')
     axs[0, 0].plot(df_iso52k.index, df_iso52k['Zone "Z1".2 theta_int_a'], label='Air temperature iso52k', linewidth=0.5, color='black', linestyle="dashed")
 
-    axs[0, 1].plot(df_ida['Floor, Deg-C'], label="Floor_IDA ICE")
+    axs[0, 1].plot(df_ida[floor_key], label="Floor_IDA ICE")
     axs[0, 1].plot(df_iso52k['Ground Floor: pli 4 (INT) theta_int_a'], label='Floor iso52k', linestyle="dashed")
     axs[0, 1].plot(df_ida.index, df_ida['Mean air temperature, Deg-C'], label="Air temperature  IDA ICE", linewidth=0.5, color='black')
     axs[0, 1].plot(df_iso52k.index, df_iso52k['Zone "Z1".2 theta_int_a'], label='Air temperature iso52k', linewidth=0.5, color='black', linestyle="dashed")

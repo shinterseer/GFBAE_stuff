@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import time
 import copy
 
+
 def set_global_seed(seed=0):
     np.random.seed(seed)
     random.seed(seed)
@@ -54,7 +55,7 @@ class SmartBuildingEnv:
         # return np.array([self.indoor_temp])
 
     def _normalize_temperature(self, temperature):
-        return (temperature - (self.temperature_min + self.temperature_max) / 2) / ((self.temperature_max - self.temperature_min)/2)
+        return (temperature - (self.temperature_min + self.temperature_max) / 2) / ((self.temperature_max - self.temperature_min) / 2)
 
     def step(self, action):
         heat_power = self.heating_levels[action]
@@ -89,7 +90,7 @@ class SmartBuildingEnv:
 # DQN Agent
 class DQNAgent:
     def __init__(self, state_size, action_size, num_layers=2, neurons_per_layer=24, learning_rate=0.001,
-                 epsilon_decay=0.99, batch_size=32*1024, memory_size=1024*1024):
+                 epsilon_decay=0.99, batch_size=None, memory_size=1024 * 1024):
         self.state_size = state_size
         self.action_size = action_size
         self.memory = deque(maxlen=memory_size)
@@ -98,7 +99,10 @@ class DQNAgent:
         self.epsilon = 1.0
         self.epsilon_min = 0.01
         self.epsilon_decay = epsilon_decay
-        self.batch_size = batch_size
+        if batch_size is None:
+            self.batch_size = int(memory_size / 32)
+        else:
+            self.batch_size = batch_size
         self.model = self._build_model(num_layers, neurons_per_layer)
         self.target_model = keras.models.clone_model(self.model)
         self.target_model.set_weights(self.model.get_weights())
@@ -123,8 +127,17 @@ class DQNAgent:
     def act(self, state):
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
-        act_values = self.model.predict(state[np.newaxis], verbose=0)
+        # act_values = self.model.predict(state[np.newaxis], verbose=0)
+        act_values = self.model(state[np.newaxis], verbose=0, training=False)
         return np.argmax(act_values[0])
+
+    def act_batch(self, states: np.ndarray) -> np.ndarray:
+        # states: shape (batch_size, state_dim)
+        if np.random.rand() < self.epsilon:
+            # random actions
+            return np.random.randint(0, self.action_size, size=len(states))
+        act_values = self.model(states, training=False)
+        return np.argmax(act_values.numpy(), axis=1)
 
     def replay(self):
         if len(self.memory) < self.batch_size:
@@ -149,7 +162,6 @@ class DQNAgent:
         # Compute updated Q-values
         for i, (state, action, reward, next_state) in enumerate(minibatch):
             q_values[i][action] = reward + self.gamma * np.amax(q_next[i])
-
 
         # Train in one batch
         self.model.fit(states, q_values, epochs=1, verbose=0)
@@ -177,22 +189,22 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
     return load_curve / peak
 
 
-def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.keras", num_episodes=300, learning_rate=0.001):
+def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.keras", num_episode_batches=300, learning_rate=0.001,
+             fill_memory_this_many_times=10, agent_memory_size=32 * 1024):
     start_time = time.time()
     prices = get_consumption_weight_curve(resample_in_minutes=60)
     env = SmartBuildingEnv(prices=prices.array)
     state_size = env.reset().shape[0]
     action_size = 3
-    epsilon_decay = np.pow(.1, 2 / num_episodes)
+    epsilon_decay = np.pow(.1, 2 / num_episode_batches)
     agent = DQNAgent(state_size, action_size, num_layers=num_layers, neurons_per_layer=neurons_per_layer,
-                     epsilon_decay=epsilon_decay, learning_rate=learning_rate)
+                     epsilon_decay=epsilon_decay, learning_rate=learning_rate, memory_size=agent_memory_size)
     # agent.epsilon = 0
     # agent.epsilon_min = 0
 
     # fill memory of agent
     while True:
         state = env.reset()
-        total_reward = 0
         for _ in range(env.max_steps):
             action = agent.act(state)
             next_state, reward, done = env.step(action)
@@ -200,28 +212,48 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
             state = next_state
             if done:
                 break
-        memory_fill = agent.memory.__sizeof__() / agent.memory.maxlen
-        print(f'\rfilling agent memory... {memory_fill * 100 :.1f} %', end='', flush=True)
-        if memory_fill >= 1:
+        memory_fill_level = agent.memory.__sizeof__() / agent.memory.maxlen
+        print(f'\rfilling agent memory... {memory_fill_level * 100 :.1f} %', end='', flush=True)
+        if memory_fill_level >= 1:
             print('')
             break
 
-    for e in range(num_episodes):
-        state = env.reset()
+
+    # we want to fill the memory through training experiences fill_memory_this_many_times times
+    # so we need to see how many episodes we need in a batch
+    episodes_per_batch = int(np.floor(agent_memory_size * fill_memory_this_many_times / num_episode_batches / env.max_steps) + 1)
+    env_list = [SmartBuildingEnv(prices=prices.array) for _ in range(num_episode_batches)]
+    act_array = np.zeros(num_episode_batches)
+    next_state_array = np.zeros((num_episode_batches, state_size))
+    reward_array = np.zeros(num_episode_batches)
+    done_array = np.zeros(num_episode_batches)
+
+    print(f'starting training with {episodes_per_batch} episodes per batch')
+    global_start_time = time.time()
+    for e in range(num_episode_batches):
+        iteration_start_time = time.time()
         total_reward = 0
-        for _ in range(env.max_steps):
-            action = agent.act(state)
-            next_state, reward, done = env.step(action)
-            agent.remember(state, action, reward, next_state)
-            state = next_state
-            total_reward += reward
-            if done:
-                break
+        # for env in env_list:
+        # for i in range(episodes_per_batch):
+        for i in range(episodes_per_batch):
+            state = env.reset()
+            for _ in range(env.max_steps):
+
+                action = agent.act(state) # this would be the thing to do according to Mnih et. al.
+                next_state, reward, done = env.step(action)
+                agent.remember(state, action, reward, next_state)
+                state = next_state
+                total_reward += reward
+                if done:
+                    break
 
         agent.replay()
         agent.update_target_model()
 
-        print(f"Episode {e + 1}/{num_episodes}, Reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}")
+        print(f'Trainig... Episode batch: {e + 1}/{num_episode_batches}, Avg. reward: {total_reward/episodes_per_batch:.2f}, Epsilon: {agent.epsilon:.2f}, '
+              f'iteration (s): {time.time() - iteration_start_time:.2f}, '
+              f'duration (min): {(time.time() - global_start_time)/(e+1)*num_episode_batches/60.:.2f}, '
+              f'time left (min): {(time.time() - global_start_time)/(e+1)*num_episode_batches/60. - (time.time() - global_start_time)/60:.2f}', flush=True)
 
     print(f"Training complete. Time: {time.time() - start_time:.2f}. saving model to {file_model}")
     agent.model.save(file_model)
@@ -259,6 +291,8 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
 
     axs[1].plot(env.daily_prices, label='energy price')
     axs[1].plot(actions, label='Heating level')
+    axs[1].grid()
+    axs[1].legend()
 
     plt.show(block=True)
 
@@ -267,7 +301,7 @@ def main():
     num_layers = 32
     neurons_per_layer = 64
     set_global_seed()
-    training(num_layers, neurons_per_layer, num_episodes=40)
+    training(num_layers, neurons_per_layer, num_episode_batches=40)
     test_model(num_layers, neurons_per_layer)
 
 
