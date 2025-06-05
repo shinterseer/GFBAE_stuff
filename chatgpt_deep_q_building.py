@@ -19,7 +19,7 @@ def set_global_seed(seed=0):
 
 # Environment
 class SmartBuildingEnv:
-    def __init__(self, forecast_len=8, init_temperature=22, temperature_min=20, temperature_max=24, prices=None):
+    def __init__(self, forecast_len=12, init_temperature=22, temperature_min=20, temperature_max=24, prices=None):
         self.forecast_len = forecast_len
         self.max_steps = 24  # One episode = one day = 24 hours
         self.heating_levels = [0.0, 1.0, 2.0]
@@ -218,7 +218,6 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
             print('')
             break
 
-
     # we want to fill the memory through training experiences fill_memory_this_many_times times
     # so we need to see how many episodes we need in a batch
     episodes_per_batch = int(np.floor(agent_memory_size * fill_memory_this_many_times / num_episode_batches / env.max_steps) + 1)
@@ -228,6 +227,7 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
     next_state_array = np.zeros((episodes_per_batch, state_size))
     reward_array = np.zeros(episodes_per_batch)
     done_array = np.zeros(episodes_per_batch)
+    avg_reward_array = np.zeros(num_episode_batches)
 
     print(f'starting training with {episodes_per_batch} episodes per batch')
     global_start_time = time.time()
@@ -256,12 +256,14 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
 
         agent.replay()
         agent.update_target_model()
-
-        print(f'Trainig... Episode batch: {e + 1}/{num_episode_batches}, Avg. reward: {total_reward/episodes_per_batch:.2f}, Epsilon: {agent.epsilon:.2f}, '
+        avg_reward_array[e] = total_reward / episodes_per_batch
+        print(f'Trainig... Episode batch: {e + 1}/{num_episode_batches}, Avg. reward: {avg_reward_array[e]:.2f}, Epsilon: {agent.epsilon:.2f}, '
               f'iteration (s): {time.time() - iteration_start_time:.2f}, '
-              f'duration (min): {(time.time() - global_start_time)/(e+1)*num_episode_batches/60.:.2f}, '
-              f'time left (min): {(time.time() - global_start_time)/(e+1)*num_episode_batches/60. - (time.time() - global_start_time)/60:.2f}', flush=True)
-
+              f'duration (min): {(time.time() - global_start_time) / (e + 1) * num_episode_batches / 60.:.2f}, '
+              f'time left (min): {(time.time() - global_start_time) / (e + 1) * num_episode_batches / 60. - (time.time() - global_start_time) / 60:.2f}', flush=True)
+        # plt.scatter(e, avg_reward_array[e])
+        # plt.grid(True)
+        # plt.show(block=True)
     print(f"Training complete. Time: {time.time() - start_time:.2f}. saving model to {file_model}")
     agent.model.save(file_model)
 
@@ -305,10 +307,10 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
 
 
 def main():
-    num_layers = 32
-    neurons_per_layer = 64
+    num_layers = 64
+    neurons_per_layer = 128
     set_global_seed()
-    training(num_layers, neurons_per_layer, num_episode_batches=200)
+    training(num_layers, neurons_per_layer, num_episode_batches=2000, agent_memory_size=256 * 1024)
     test_model(num_layers, neurons_per_layer)
 
 
