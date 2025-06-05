@@ -190,7 +190,7 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
 
 
 def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.keras", num_episode_batches=300, learning_rate=0.001,
-             fill_memory_this_many_times=10, agent_memory_size=32 * 1024):
+             fill_memory_this_many_times=10, agent_memory_size=32 * 1024, set_epsilon_zero=False, logfile_name='logfile.csv'):
     start_time = time.time()
     prices = get_consumption_weight_curve(resample_in_minutes=60)
     env = SmartBuildingEnv(prices=prices.array)
@@ -199,8 +199,6 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
     epsilon_decay = np.pow(.1, 2 / num_episode_batches)
     agent = DQNAgent(state_size, action_size, num_layers=num_layers, neurons_per_layer=neurons_per_layer,
                      epsilon_decay=epsilon_decay, learning_rate=learning_rate, memory_size=agent_memory_size)
-    # agent.epsilon = 0
-    # agent.epsilon_min = 0
 
     # fill memory of agent
     while True:
@@ -218,6 +216,10 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
             print('')
             break
 
+    if set_epsilon_zero:  # for speed testing purposes - normally this should not be True
+        agent.epsilon = 0
+        agent.epsilon_min = 0
+
     # we want to fill the memory through training experiences fill_memory_this_many_times times
     # so we need to see how many episodes we need in a batch
     episodes_per_batch = int(np.floor(agent_memory_size * fill_memory_this_many_times / num_episode_batches / env.max_steps) + 1)
@@ -229,7 +231,10 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
     done_array = np.zeros(episodes_per_batch)
     avg_reward_array = np.zeros(num_episode_batches)
 
-    print(f'starting training with {episodes_per_batch} episodes per batch')
+    logfile = open(logfile_name, 'w')
+    logstring = f'starting training with {episodes_per_batch} episodes per batch'
+    print(logstring)
+    logfile.write(logstring + '\n')
     global_start_time = time.time()
     for e in range(num_episode_batches):
         iteration_start_time = time.time()
@@ -257,14 +262,19 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
         agent.replay()
         agent.update_target_model()
         avg_reward_array[e] = total_reward / episodes_per_batch
-        print(f'Trainig... Episode batch: {e + 1}/{num_episode_batches}, Avg. reward: {avg_reward_array[e]:.2f}, Epsilon: {agent.epsilon:.2f}, '
-              f'iteration (s): {time.time() - iteration_start_time:.2f}, '
-              f'duration (min): {(time.time() - global_start_time) / (e + 1) * num_episode_batches / 60.:.2f}, '
-              f'time left (min): {(time.time() - global_start_time) / (e + 1) * num_episode_batches / 60. - (time.time() - global_start_time) / 60:.2f}', flush=True)
+        logstring = (f'Trainig... Episode batch: {e + 1}/{num_episode_batches}, Avg. reward: {avg_reward_array[e]:.2f}, Epsilon: {agent.epsilon:.2f}, '
+                     f'iteration (s): {time.time() - iteration_start_time:.2f}, '
+                     f'duration (min): {(time.time() - global_start_time) / (e + 1) * num_episode_batches / 60.:.2f}, '
+                     f'time left (min): {(time.time() - global_start_time) / (e + 1) * num_episode_batches / 60. - (time.time() - global_start_time) / 60:.2f}')
+        print(logstring, flush=True)
+        logfile.write(logstring + '\n')
         # plt.scatter(e, avg_reward_array[e])
         # plt.grid(True)
         # plt.show(block=True)
-    print(f"Training complete. Time: {time.time() - start_time:.2f}. saving model to {file_model}")
+    logstring = f"Training complete. Time: {time.time() - start_time:.2f}. saving model to {file_model}"
+    print(logstring)
+    logfile.write(logstring + '\n')
+    logfile.close()
     agent.model.save(file_model)
 
 
@@ -307,10 +317,12 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
 
 
 def main():
-    num_layers = 64
-    neurons_per_layer = 128
+    # num_layers = 64
+    # neurons_per_layer = 128
+    num_layers = 8
+    neurons_per_layer = 512
     set_global_seed()
-    training(num_layers, neurons_per_layer, num_episode_batches=2000, agent_memory_size=256 * 1024)
+    training(num_layers, neurons_per_layer, num_episode_batches=10000, agent_memory_size=256 * 1024, set_epsilon_zero=False)
     test_model(num_layers, neurons_per_layer)
 
 
