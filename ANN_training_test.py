@@ -7,6 +7,7 @@ import time
 import pandas as pd
 import pickle
 
+
 class ModelInfo:
     def __init__(self, num_layers, neurons_per_layer):
         self.num_layers = num_layers

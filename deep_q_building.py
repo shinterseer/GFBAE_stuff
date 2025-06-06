@@ -22,7 +22,7 @@ def set_global_seed(seed=0):
 # Environment
 class SmartBuildingEnv:
     def __init__(self, forecast_len=12, init_temperature=22, temperature_min=20, temperature_max=24,
-                 heat_power_factor=2, heat_loss_factor=0.1,  prices=None,
+                 heat_power_factor=1, heat_loss_factor=0.025,  prices=None,
                  comfort_violation_reward=-100):
         self.forecast_len = forecast_len
         self.max_steps = 24  # One episode = one day = 24 hours
@@ -342,8 +342,12 @@ def main():
     # neurons_per_layer = 128
     num_layers = 8
     neurons_per_layer = 512
+    num_layers = 4
+    neurons_per_layer = 64
+    # num_layers = 4
+    # neurons_per_layer = 16
     set_global_seed()
-    training(num_layers, neurons_per_layer, num_episode_batches=1000, agent_memory_size=256 * 1024, set_epsilon_zero=False)
+    training(num_layers, neurons_per_layer, num_episode_batches=200, agent_memory_size=256 * 1024, set_epsilon_zero=False, learning_rates=(.001, .001, .0001))
     test_model(num_layers, neurons_per_layer)
 
 
