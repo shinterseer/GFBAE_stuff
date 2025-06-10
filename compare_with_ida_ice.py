@@ -19,6 +19,7 @@ def check_epw():
                    ]
                    ]
 
+
 def create_zero_sun_berlin():
     # Read the header lines separately
     path = 'C:/Users/shinterseer/Desktop/GFBAE/GFBAE.Simulation/Example/'
@@ -39,7 +40,6 @@ def create_zero_sun_berlin():
 
     # Zero out Direct Normal Illuminance, Diffuse Horizontal Illuminance, Zenith Luminance
     data.iloc[:, 17:20] = 0
-
 
     # Write it back to a new EPW file
     with open(path + file_out, 'w') as f:
@@ -79,18 +79,15 @@ def get_outside_temperature(filename='outside_temperature_unsampled.csv',
     return df_resampled
 
 
-
-
 def main():
     # get_outside_temperature_mistral()
     # df_ida_ice_outside = get_outside_temperature()
     pass
-    # filename_ida = '20250603_Results.csv'
-    # floor_key = 'Floor, Deg-C'
+    filename_ida = '20250603_Results.csv'
+    floor_key = 'Floor, Deg-C'
     # filename_ida = '20250604_Results.csv'
-    floor_key = 'Floor - Crawl space, Deg-C'
-    filename_ida = '20250605_Results_no_sun.csv'
-
+    # floor_key = 'Floor - Crawl space, Deg-C'
+    # filename_ida = '20250605_Results_no_sun.csv'
 
     path = 'C:/Users/shinterseer/Desktop/GFBAE/IDA_ICE_Simulation_20250521/'
     df_ida = pd.read_csv(path + filename_ida)
@@ -101,8 +98,8 @@ def main():
 
     # df = pd.read_csv(filename, index_col=0)
     # df.index = pd.to_datetime(df.index)
-    # df_iso52k = pd.read_csv('SimulationResults_with_sun_20250602.csv', index_col=0)
-    df_iso52k = pd.read_csv('SimulationResults_without_sun_20250605.csv', index_col=0)
+    df_iso52k = pd.read_csv('SimulationResults_with_sun_20250602.csv', index_col=0)
+    # df_iso52k = pd.read_csv('SimulationResults_without_sun_20250605.csv', index_col=0)
     df_iso52k.index = pd.to_datetime(df_iso52k.index)
 
     # Step 2: Combine row 0 with original column names

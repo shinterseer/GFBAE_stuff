@@ -22,7 +22,7 @@ def set_global_seed(seed=0):
 # Environment
 class SmartBuildingEnv:
     def __init__(self, forecast_len=12, init_temperature=22, temperature_min=20, temperature_max=24,
-                 heat_power_factor=1, heat_loss_factor=0.025,  prices=None,
+                 heat_power_factor=1, heat_loss_factor=0.025, prices=None,
                  comfort_violation_reward=-100):
         self.forecast_len = forecast_len
         self.max_steps = 24  # One episode = one day = 24 hours
@@ -201,14 +201,15 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
     return load_curve / peak
 
 
-def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.keras", num_episode_batches=300, learning_rates=(.1, .01, .001),
-             fill_memory_this_many_times=10, agent_memory_size=32 * 1024, set_epsilon_zero=False, logfile_name='logfile.csv'):
+def training(num_layers=1, neurons_per_layer=1, num_episode_batches=300, learning_rates=(.1, .01, .001),
+             fill_memory_this_many_times=10, agent_memory_size=32 * 1024, set_epsilon_zero=False, logfile_stem='logfile', epsilon_at_halfpoint=.1,
+             file_stem='file_stem'):
     start_time = time.time()
     prices = get_consumption_weight_curve(resample_in_minutes=60)
     env = SmartBuildingEnv(prices=prices.array)
     state_size = env.reset().shape[0]
     action_size = 3
-    epsilon_decay = np.pow(.1, 2 / num_episode_batches)
+    epsilon_decay = np.pow(epsilon_at_halfpoint, 2 / num_episode_batches)
     agent = DQNAgent(state_size, action_size, num_layers=num_layers, neurons_per_layer=neurons_per_layer,
                      epsilon_decay=epsilon_decay, memory_size=agent_memory_size)
     agent.model.optimizer.learning_rate.assign(learning_rates[0])
@@ -245,18 +246,26 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
     avg_reward_array = np.zeros(num_episode_batches)
     done_array = np.zeros(episodes_per_batch, dtype=np.bool)
 
-    logfile = open(logfile_name, 'w')
+    log_keys = ['reward', 'episode_batch', 'iteration_time_in_s', 'epsilon', 'learning_rate']
+    log_dict = dict()
+    for key in log_keys:
+        log_dict[key] = np.ones(num_episode_batches) * -1
+
+    # logfile = open(logfile_stem + '.txt', 'w')
     logstring = f'starting training with {episodes_per_batch} episodes per batch'
     print(logstring)
-    logfile.write(logstring + '\n')
+    # logfile.write(logstring + '\n')
     global_start_time = time.time()
-    adjust_learning_rate_at = [int(num_episode_batches/3), int(num_episode_batches*2/3)]
+
+    # adjust_learning_rate_at = [int(num_episode_batches/3), int(num_episode_batches*2/3)]
+    adjust_learning_rate_at = [int(num_episode_batches * (i + 1) / len(learning_rates))
+                               for i in range(len(learning_rates) - 1)]
 
     for e in range(num_episode_batches):
-        if e == adjust_learning_rate_at[0]:
-            agent.model.optimizer.learning_rate.assign(learning_rates[1])
-        elif e == adjust_learning_rate_at[1]:
-            agent.model.optimizer.learning_rate.assign(learning_rates[2])
+        if e in adjust_learning_rate_at:
+            found_at = adjust_learning_rate_at.index(e)
+            if found_at > 0:
+                agent.model.optimizer.learning_rate.assign(learning_rates[found_at + 1])
 
         iteration_start_time = time.time()
         total_reward = 0
@@ -282,35 +291,50 @@ def training(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.
 
         agent.replay()
         agent.update_target_model()
-        avg_reward_array[e] = total_reward / episodes_per_batch
-        logstring = (f'Trainig... Episode batch: {e + 1}/{num_episode_batches}, Avg. reward: {avg_reward_array[e]:.2f}, Epsilon: {agent.epsilon:.2f}, '
-                     f'iteration (s): {time.time() - iteration_start_time:.2f}, '
+        iteration_time = time.time() - iteration_start_time
+        avg_reward = total_reward / episodes_per_batch
+        learning_rate = float(agent.model.optimizer.learning_rate)
+        logstring = (f'Trainig... Episode batch: {e + 1}/{num_episode_batches}, Avg. reward: {avg_reward:.2f}, Epsilon: {agent.epsilon:.1e}, '
+                     f'learning rate: {learning_rate:.1e}, iteration (s): {iteration_time:.2f}, '
                      f'duration (min): {(time.time() - global_start_time) / (e + 1) * num_episode_batches / 60.:.2f}, '
                      f'time left (min): {(time.time() - global_start_time) / (e + 1) * num_episode_batches / 60. - (time.time() - global_start_time) / 60:.2f}')
+
+        log_dict['episode_batch'][e] = e
+        log_dict['reward'][e] = avg_reward
+        log_dict['iteration_time_in_s'][e] = iteration_time
+        log_dict['epsilon'][e] = agent.epsilon
+        log_dict['learning_rate'][e] = learning_rate
+
         print(logstring, flush=True)
-        logfile.write(logstring + '\n')
+        # logfile.write(logstring + '\n')
         # plt.scatter(e, avg_reward_array[e])
         # plt.grid(True)
         # plt.show(block=True)
-    logstring = f"Training complete. Time: {time.time() - start_time:.2f}. saving model to {file_model}"
+    logstring = f"Training complete. Time: {time.time() - start_time:.2f}. saving model to {file_stem + '.keras'}"
     print(logstring)
-    logfile.write(logstring + '\n')
-    logfile.close()
-    agent.model.save(file_model)
+    # logfile.write(logstring + '\n')
+    # logfile.close()
+    df_log = pd.DataFrame(log_dict)
+    # df_log.to_csv(logfile_stem + '.csv', index=False)
+    df_log.to_csv(file_stem + '.csv', index=False)
+    agent.model.save(file_stem + '.keras')
 
 
-def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_building.keras"):
+# def test_model(file_model="chatgpt_deep_q_building.keras"):
+def test_model(axs, file_stem='chatgpt_deep_q_building'):
+    file_model = file_stem + '.keras'
+    df_log = pd.read_csv(file_stem + '.csv')
+
     prices = get_consumption_weight_curve(resample_in_minutes=60)
     env = SmartBuildingEnv(prices=prices.array)
     state_size = env.reset().shape[0]
     action_size = len(env.heating_levels)
-    agent = DQNAgent(state_size, action_size, num_layers=num_layers, neurons_per_layer=neurons_per_layer)
+    agent = DQNAgent(state_size, action_size)
     agent.model = keras.models.load_model(file_model)
     agent.epsilon = 0
     agent.epsilon_min = 0
     rewards = np.zeros(24)
     temperatures = np.zeros(24)
-    prices = np.zeros((24, state_size-1))
     actions = np.zeros(24, dtype=int)
 
     state = env.reset()
@@ -318,10 +342,9 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
         actions[i] = agent.act(state)
         state, rewards[i], done = env.step(actions[i])
         temperatures[i] = state[0]
-        prices[i, :] = state[1:]
 
-    print(f"rewards over 24 hours: {sum(rewards[:24]):.2f}")
-    fig, axs = plt.subplots(1, 2)
+    # print(f"rewards over 24 hours: {sum(rewards[:24]):.2f}")
+    # fig, axs = plt.subplots(1, 3)
 
     axs[0].plot(temperatures, label='Temperature')
     axs[0].plot(actions, label='Heating level')
@@ -334,22 +357,84 @@ def test_model(num_layers, neurons_per_layer, file_model="chatgpt_deep_q_buildin
     axs[1].grid()
     axs[1].legend()
 
+    axs[2].plot(df_log['reward'], color='grey', label='reward')
+    axs[2].plot(df_log['reward'].rolling(int(df_log.shape[0]/10), center=True).mean(), label='reward_rolling', color='black', linewidth=1.5)
+    axs[2].plot(df_log['reward'].rolling(int(df_log.shape[0]/10), center=True).mean(), label='reward_rolling', color='black', linewidth=1.5)
+    axs2 = axs[2].twinx()
+    axs2.plot(np.log10(df_log['learning_rate']), color='blue', label='log learning rate')
+    axs2.plot(np.log10(df_log['epsilon']), color='orange', label='log epsilon')
+    # axs2.set_ylim(0, 0.2)
+    axs2.legend()
+    axs[2].grid()
+    axs[2].legend()
+    # plt.show(block=True)
+
+
+def multitest(stem_list):
+    fig, axs = plt.subplots(nrows=max(len(stem_list), 2), ncols=3)
+    for i, stem in enumerate(stem_list):
+        test_model(axs[i, :], stem)
     plt.show(block=True)
 
-
 def main():
+    set_global_seed()
+    # num_layers = 64
     # num_layers = 64
     # neurons_per_layer = 128
-    num_layers = 8
-    neurons_per_layer = 512
-    num_layers = 4
-    neurons_per_layer = 64
+    # num_layers = 8
+    # neurons_per_layer = 512
     # num_layers = 4
-    # neurons_per_layer = 16
-    set_global_seed()
-    training(num_layers, neurons_per_layer, num_episode_batches=200, agent_memory_size=256 * 1024, set_epsilon_zero=False, learning_rates=(.001, .001, .0001))
-    test_model(num_layers, neurons_per_layer)
+    # neurons_per_layer = 64
+    # num_episode_batches = 50
+    desired_batch_size = 32
+    # memory_size = int(num_episode_batches * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    training_runs = []
 
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 1000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'./training_dqn_building/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 1000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'./training_dqn_building/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 2000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'./training_dqn_building/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 2000,
+                      'epsilon_at_halfpoint': .05, 'learning_rates': (.001, .001, .0001)}
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'./training_dqn_building/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 2000,
+                      'epsilon_at_halfpoint': .05, 'learning_rates': (.001, .001, .0001, .0001)}
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'./training_dqn_building/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    # for training_run in training_runs:
+    #     training(**training_run)
+
+    # test_model(file_stem='./training_dqn_building/dqn_building_n4x32_m76800')
+    multitest(['./training_dqn_building/dqn_building_n4x32_m76800'])
 
 if __name__ == '__main__':
     main()
