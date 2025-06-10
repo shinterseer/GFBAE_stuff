@@ -11,6 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import time
 import copy
+import os
 
 
 def set_global_seed(seed=0):
@@ -358,8 +359,8 @@ def test_model(axs, file_stem='chatgpt_deep_q_building'):
     axs[1].legend()
 
     axs[2].plot(df_log['reward'], color='grey', label='reward')
-    axs[2].plot(df_log['reward'].rolling(int(df_log.shape[0]/10), center=True).mean(), label='reward_rolling', color='black', linewidth=1.5)
-    axs[2].plot(df_log['reward'].rolling(int(df_log.shape[0]/10), center=True).mean(), label='reward_rolling', color='black', linewidth=1.5)
+    axs[2].plot(df_log['reward'].rolling(int(df_log.shape[0] / 10), center=True).mean(), label='reward_rolling', color='black', linewidth=1.5)
+    axs[2].plot(df_log['reward'].rolling(int(df_log.shape[0] / 10), center=True).mean(), label='reward_rolling', color='black', linewidth=1.5)
     axs2 = axs[2].twinx()
     axs2.plot(np.log10(df_log['learning_rate']), color='blue', label='log learning rate')
     axs2.plot(np.log10(df_log['epsilon']), color='orange', label='log epsilon')
@@ -370,11 +371,208 @@ def test_model(axs, file_stem='chatgpt_deep_q_building'):
     # plt.show(block=True)
 
 
-def multitest(stem_list):
-    fig, axs = plt.subplots(nrows=max(len(stem_list), 2), ncols=3)
-    for i, stem in enumerate(stem_list):
-        test_model(axs[i, :], stem)
+def multitest(directory):
+    all_files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+    all_stems = set([file[:file.find('.')] for file in all_files])
+
+    fig, axs = plt.subplots(nrows=max(len(all_stems), 2), ncols=3)
+    for i, stem in enumerate(all_stems):
+        axs[i, 0].set_title(stem)
+        test_model(axs[i, :], directory + '/' + stem)
+    plt.tight_layout()
     plt.show(block=True)
+
+
+def get_runs20250610(save_to='./out_dir'):
+    desired_batch_size = 32
+    training_runs = []
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 1000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 1000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 2000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 2000,
+                      'epsilon_at_halfpoint': .05, 'learning_rates': (.001, .001, .0001)}
+    suffix = '_eh05_lr3'
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 2000,
+                      'epsilon_at_halfpoint': .05, 'learning_rates': (.001, .001, .0001, .0001)}
+    suffix = '_eh05_lr4'
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    return training_runs
+
+
+def get_runs20250610_overnight(save_to='./out_dir'):
+    desired_batch_size = 32
+    training_runs = []
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 1000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 16, 'num_episode_batches': 1000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 1000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001, .0001)}
+    suffix = '_lr4'
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 1000,
+                      'epsilon_at_halfpoint': .05, 'learning_rates': (.001, .001, .0001)}
+    suffix = '_eh05'
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 2000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 4000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 8000,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    return training_runs
+
+
+def get_runs20250610_dummy(save_to='./out_dir'):
+    desired_batch_size = 32
+    training_runs = []
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 10,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 16, 'num_episode_batches': 10,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 10,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001, .0001)}
+    suffix = '_lr4'
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 10,
+                      'epsilon_at_halfpoint': .05, 'learning_rates': (.001, .001, .0001)}
+    suffix = '_eh05'
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 20,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 40,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 80,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    return training_runs
+
 
 def main():
     set_global_seed()
@@ -386,55 +584,17 @@ def main():
     # num_layers = 4
     # neurons_per_layer = 64
     # num_episode_batches = 50
-    desired_batch_size = 32
     # memory_size = int(num_episode_batches * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
-    training_runs = []
 
-    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 1000,
-                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
-    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
-    parameter_dict['agent_memory_size'] = memory_size
-    file_stem = f'./training_dqn_building/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}'
-    parameter_dict['file_stem'] = file_stem
-    training_runs.append(parameter_dict)
-
-    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 32, 'num_episode_batches': 1000,
-                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
-    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
-    parameter_dict['agent_memory_size'] = memory_size
-    file_stem = f'./training_dqn_building/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}'
-    parameter_dict['file_stem'] = file_stem
-    training_runs.append(parameter_dict)
-
-    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 2000,
-                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001)}
-    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
-    parameter_dict['agent_memory_size'] = memory_size
-    file_stem = f'./training_dqn_building/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}'
-    parameter_dict['file_stem'] = file_stem
-    training_runs.append(parameter_dict)
-
-    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 2000,
-                      'epsilon_at_halfpoint': .05, 'learning_rates': (.001, .001, .0001)}
-    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
-    parameter_dict['agent_memory_size'] = memory_size
-    file_stem = f'./training_dqn_building/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}'
-    parameter_dict['file_stem'] = file_stem
-    training_runs.append(parameter_dict)
-
-    parameter_dict = {'num_layers': 4, 'neurons_per_layer': 64, 'num_episode_batches': 2000,
-                      'epsilon_at_halfpoint': .05, 'learning_rates': (.001, .001, .0001, .0001)}
-    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
-    parameter_dict['agent_memory_size'] = memory_size
-    file_stem = f'./training_dqn_building/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}'
-    parameter_dict['file_stem'] = file_stem
-    training_runs.append(parameter_dict)
-
-    # for training_run in training_runs:
-    #     training(**training_run)
+    path = './training_runs20250610_overnight'
+    os.makedirs(path, exist_ok=True)
+    training_runs = get_runs20250610_overnight(save_to=path)
+    for training_run in training_runs:
+        training(**training_run)
 
     # test_model(file_stem='./training_dqn_building/dqn_building_n4x32_m76800')
-    multitest(['./training_dqn_building/dqn_building_n4x32_m76800'])
+    # multitest('./training_runs20250610_dummy')
+
 
 if __name__ == '__main__':
     main()
