@@ -11,6 +11,7 @@ import time
 import copy
 import pickle
 
+
 def set_global_seed(seed=0):
     np.random.seed(seed)
     random.seed(seed)
