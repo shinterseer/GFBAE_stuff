@@ -109,7 +109,7 @@ class SmartBuildingEnv:
 # DQN Agent
 class DQNAgent:
     def __init__(self, state_size, action_size, num_layers=2, neurons_per_layer=24, learning_rate=0.001,
-                 epsilon_decay=0.99, batch_size=None, memory_size=1024 * 1024):
+                 epsilon_decay=0.99, batch_size=None, memory_size=1024 * 1024, run_on_gpu=True):
 
         self.state_size = state_size
         self.action_size = action_size
@@ -132,6 +132,10 @@ class DQNAgent:
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if run_on_gpu:
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
         self.model = self.model.to(self.device)
         self.target_model = self.target_model.to(self.device)
 
@@ -200,54 +204,32 @@ class DQNAgent:
     def replay(self):
         if len(self.memory) < self.batch_size:
             return
+
         minibatch = random.sample(self.memory, self.batch_size)
-        # for state, action, reward, next_state in minibatch:
-        #     target = self.model.predict(state[np.newaxis], verbose=0)
-        #     t = self.target_model.predict(next_state[np.newaxis], verbose=0)
-        #     target[0][action] = reward + self.gamma * np.amax(t[0])
-        #     self.model.fit(state[np.newaxis], target, epochs=1, verbose=0)
+        states = torch.from_numpy(np.vstack([s for s, _, _, _ in minibatch])).float().to(self.device)
+        next_states = torch.from_numpy(np.vstack([ns for _, _, _, ns in minibatch])).float().to(self.device)
+        actions = torch.tensor([a for _, a, _, _ in minibatch]).long().to(self.device)
+        rewards = torch.tensor([r for _, _, r, _ in minibatch]).float().to(self.device)
 
-        # Vectorized approach
-        states = np.array([s for s, _, _, _ in minibatch])
-        next_states = np.array([ns for _, _, _, ns in minibatch])
-        actions = np.array([a for _, a, _, _ in minibatch])
-        rewards = np.array([r for _, _, r, _ in minibatch])
+        # Predict current Q-values and target Q-values
+        self.model.train() # puts the model in taining mode (activates random dropout to avoid overfitting)
+        q_values = self.model(states) # chattie says - it is correct to get these in training mode
+        with torch.no_grad(): # turn off tracking operations on tensors - this saves memory and computation time
+            q_next = self.target_model(next_states)
+            max_q_next = q_next.max(1)[0]  # max over actions - its a minibatch of quality estimates of the next states
 
-        # Predict Q-values for all states and next states at once
-        # q_values = self.model.predict(states, verbose=0)
-        # q_next = self.target_model.predict(next_states, verbose=0)
+        # Compute target Q-values
+        target_q_values = q_values.clone()
+        target_q_values[range(self.batch_size), actions] = rewards + self.gamma * max_q_next
 
-        # Compute updated Q-values
-        # keras/tf version
-        # for i, (state, action, reward, next_state) in enumerate(minibatch):
-        #     q_values[i][action] = reward + self.gamma * np.amax(q_next[i])
-
-        # pytorch version
-        with torch.no_grad():
-            states_tensor = torch.from_numpy(states).float().to(self.device)
-            next_states_tensor = torch.from_numpy(next_states).float().to(self.device)
-
-            q_values_tensor = self.model(states_tensor)
-            q_next = self.target_model(next_states_tensor)
-
-        # Train in one batch
-        # keras/tf version
-        # self.model.fit(states, q_values, epochs=1, verbose=0)
-
-        # pytorch version
-        self.model.train()
-        states_tensor = torch.from_numpy(states).float().to(self.device)
-        # q_values_tensor = torch.from_numpy(q_values).float()
-        predictions = self.model(states_tensor).to(self.device)
-        loss = self.criterion(predictions, q_values_tensor).to(self.device)
+        # Compute loss and update model
+        loss = self.criterion(q_values, target_q_values)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
+        # Decay epsilon
         self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
-
-    # def update_target_model(self):
-    #     self.target_model.set_weights(self.model.get_weights())
 
     # pytorch version
     def update_target_model(self):
@@ -274,7 +256,7 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
 
 def training(num_layers=1, neurons_per_layer=1, num_episode_batches=300, learning_rates=(.1, .01, .001),
              fill_memory_this_many_times=10, agent_memory_size=32 * 1024, set_epsilon_zero=False, logfile_stem='logfile', epsilon_at_halfpoint=.1,
-             file_stem='file_stem'):
+             file_stem='file_stem', train_on_gpu=True):
     start_time = time.time()
     prices = get_consumption_weight_curve(resample_in_minutes=60)
     env = SmartBuildingEnv(prices=prices.array)
@@ -282,7 +264,7 @@ def training(num_layers=1, neurons_per_layer=1, num_episode_batches=300, learnin
     action_size = 3
     epsilon_decay = np.pow(epsilon_at_halfpoint, 2 / num_episode_batches)
     agent = DQNAgent(state_size, action_size, num_layers=num_layers, neurons_per_layer=neurons_per_layer,
-                     epsilon_decay=epsilon_decay, memory_size=agent_memory_size)
+                     epsilon_decay=epsilon_decay, memory_size=agent_memory_size, run_on_gpu=train_on_gpu)
     # agent.model.optimizer.learning_rate.assign(learning_rates[0])
 
     # fill memory of agent
@@ -332,6 +314,7 @@ def training(num_layers=1, neurons_per_layer=1, num_episode_batches=300, learnin
     adjust_learning_rate_at = [int(num_episode_batches * (i + 1) / len(learning_rates))
                                for i in range(len(learning_rates) - 1)]
 
+    print_every = 10
     for e in range(num_episode_batches):
         # if e in adjust_learning_rate_at:
         #     found_at = adjust_learning_rate_at.index(e)
@@ -367,7 +350,7 @@ def training(num_layers=1, neurons_per_layer=1, num_episode_batches=300, learnin
         # learning_rate = float(agent.model.optimizer.learning_rate)
         logstring = (f'Trainig... Episode batch: {e + 1}/{num_episode_batches}, Avg. reward: {avg_reward:.2f}, Epsilon: {agent.epsilon:.1e}, '
                      # f'learning rate: {learning_rate:.1e}, '
-                     'iteration (s): {iteration_time:.2f}, '
+                     f'iteration (s): {iteration_time:.2f}, '
                      f'duration (min): {(time.time() - global_start_time) / (e + 1) * num_episode_batches / 60.:.2f}, '
                      f'time left (min): {(time.time() - global_start_time) / (e + 1) * num_episode_batches / 60. - (time.time() - global_start_time) / 60:.2f}')
 
@@ -377,7 +360,8 @@ def training(num_layers=1, neurons_per_layer=1, num_episode_batches=300, learnin
         log_dict['epsilon'][e] = agent.epsilon
         # log_dict['learning_rate'][e] = learning_rate
 
-        print(logstring, flush=True)
+        if print_every > 0 and e % print_every == 0:
+            print(logstring, flush=True)
         # logfile.write(logstring + '\n')
         # plt.scatter(e, avg_reward_array[e])
         # plt.grid(True)
@@ -457,11 +441,12 @@ def training(num_layers=1, neurons_per_layer=1, num_episode_batches=300, learnin
 def main():
     set_global_seed()
 
-    path = './training_runs20250611_batch1'
+    path = './training_runs20250617_batch1'
     os.makedirs(path, exist_ok=True)
-    runs = training_runs.get_runs20250611(save_to=path)
+    runs = training_runs.get_runs20250617(save_to=path)
+    train_on_gpu = True
     for training_run in runs:
-        training(**training_run)
+        training(**training_run, train_on_gpu=train_on_gpu)
 
     # test_model(file_stem='./training_dqn_building/dqn_building_n4x32_m76800')
     # multitest(path)

@@ -1,3 +1,20 @@
+def get_runs20250617(save_to='./out_dir'):
+    desired_batch_size = 32
+    training_runs = []
+
+    parameter_dict = {'num_layers': 2, 'neurons_per_layer': 512, 'num_episode_batches': 800,
+                      'epsilon_at_halfpoint': .1, 'learning_rates': (.001, .001, .0001, .0001)}
+    suffix = ''
+    memory_size = int(parameter_dict['num_episode_batches'] * desired_batch_size * 24 / 10)  # 24 experiences per episode, 10 times more experiences than memory size
+    parameter_dict['agent_memory_size'] = memory_size
+    file_stem = f'{save_to}/dqn_building_n{parameter_dict["num_layers"]}x{parameter_dict["neurons_per_layer"]}_m{parameter_dict["agent_memory_size"]}{suffix}'
+    parameter_dict['file_stem'] = file_stem
+    training_runs.append(parameter_dict)
+
+    return training_runs
+
+
+
 def get_runs20250611(save_to='./out_dir'):
     desired_batch_size = 32
     training_runs = []

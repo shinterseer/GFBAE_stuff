@@ -84,9 +84,10 @@ def main(num_epochs=100, neuron_base=4):
     training_data = create_training_data(sample_size, output_dim)
 
     model_infos = []
-    for num_epochs in [20, 40, 80, 160, 320]:
-    # for num_epochs in [20]:
-        for neuron_base in [1, 2, 4, 8]:
+    # for num_epochs in [20, 40, 80, 160, 320]:
+    for num_epochs in [80]:
+        # for neuron_base in [1, 2, 4, 8]:
+        for neuron_base in [4]:
             print(f'\nnum_epochs: {num_epochs}, neuron_base: {neuron_base}')
             print('--------------------------------------------------------')
 
