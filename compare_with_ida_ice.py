@@ -1,35 +1,40 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import datetime
 
 
-def check_epw():
-    from pvlib.iotools import epw
-    path = 'C:/Users/shinterseer/Desktop/GFBAE/GFBAE.Simulation/Example/'
-    file_out = '2020_Berlin_no_sun.epw'
+def create_no_leap_epw(fin, fout, start_date='2020-01-01', change_year_to=None):
+    # Read the first 8 lines as header
+    with open(fin, 'r') as f:
+        header = [next(f) for _ in range(8)]
 
-    epw_data = epw.read_epw(path + file_out)
+    # Read the rest as data
+    epw = pd.read_csv(fin, skiprows=8, header=None)
 
-    epw_df = epw_data[0]
-    weather_data = epw_df.loc[
-                   :,
-                   [
-                       "temp_air",  # Air temperature
-                       "ghi",  # Global Horizontal Radiation
-                       "dhi",  # Diffuse Horizontal Radiation
-                   ]
-                   ]
+    # Generate corresponding datetime index
+    dates = pd.date_range(start_date, periods=8784, freq='h')
+
+    # Mask out Feb 29
+    mask = ~((dates.month == 2) & (dates.day == 29))
+    epw_clean = epw[mask]
+
+    if change_year_to is not None:
+        epw_clean.iloc[:, 0] = change_year_to
+
+    # Write back to new file with header
+    with open(fout, 'w') as f:
+        f.writelines(header)
+        epw_clean.to_csv(f, index=False, header=False)
 
 
-def create_zero_sun_berlin():
+def create_zero_sun_epw(fin, fout, dry=False, const_temp=None):
     # Read the header lines separately
-    path = 'C:/Users/shinterseer/Desktop/GFBAE/GFBAE.Simulation/Example/'
-    file_in = '2020_Berlin.epw'
-    file_out = '2020_Berlin_no_sun.epw'
-    with open(path + file_in, 'r') as f:
+    with open(fin, 'r') as f:
         header_lines = [next(f) for _ in range(8)]
 
     # Read the rest as data
-    data = pd.read_csv(path + file_in, skiprows=8, header=None)
+    data = pd.read_csv(fin, skiprows=8, header=None)
 
     # zero out everything with light and irradiation
     # Zero out Extraterrestrial Horizontal Radiation, Extraterrestrial Direct Normal Radiation, Horizontal Infrared Radiation Intensity
@@ -41,8 +46,17 @@ def create_zero_sun_berlin():
     # Zero out Direct Normal Illuminance, Diffuse Horizontal Illuminance, Zenith Luminance
     data.iloc[:, 17:20] = 0
 
+    # make climate completely waterless
+    if dry:
+        data.iloc[:, 7] = -70
+        data.iloc[:, 8] = 0
+
+    # set constant temperature
+    if const_temp is not None:
+        data.iloc[:, 6] = const_temp
+
     # Write it back to a new EPW file
-    with open(path + file_out, 'w') as f:
+    with open(fout, 'w') as f:
         f.writelines(header_lines)
         data.to_csv(f, index=False, header=False)
 
@@ -89,7 +103,8 @@ def main():
     # filename_ida = '20250604_Results.csv'
     floor_key = 'Floor - Crawl space, Deg-C'
     # filename_ida = '20250605_Results_no_sun.csv'
-    filename_ida = '20250616_hovering_Results.csv'
+    # filename_ida = '20250623_Results.csv'
+    filename_ida = '20250616_hovering_Results_no_sun.csv'
 
     path = 'C:/Users/shinterseer/Desktop/GFBAE/IDA_ICE_Simulation_20250521/'
     df_ida = pd.read_csv(path + filename_ida)
@@ -98,10 +113,9 @@ def main():
     df_ida.index = df_ida['datetime']
     df_ida.drop(columns=['Time', 'datetime'], inplace=True)
 
-    # df = pd.read_csv(filename, index_col=0)
-    # df.index = pd.to_datetime(df.index)
-    # df_iso52k = pd.read_csv('SimulationResults_with_sun_20250602.csv', index_col=0)
-    df_iso52k = pd.read_csv('SimulationResults_without_sun_20250605.csv', index_col=0)
+    filename_iso = 'SimulationResults_without_sun_20250605.csv'
+    # filename_iso = 'SimulationResults_with_sun_20250623.csv'
+    df_iso52k = pd.read_csv(filename_iso, index_col=0)
     df_iso52k.index = pd.to_datetime(df_iso52k.index)
 
     # Step 2: Combine row 0 with original column names
@@ -115,8 +129,8 @@ def main():
     # df_iso52k.reset_index(drop=True, inplace=True)
     df_iso52k = df_iso52k.iloc[1:, :]
     df_iso52k = df_iso52k.apply(pd.to_numeric, errors='coerce')
-    print(df_ida.columns)
-    print(df_iso52k.columns)
+    # print(df_ida.columns)
+    # print(df_iso52k.columns)
 
     x = 0
     fig, axs = plt.subplots(2, 2)
@@ -147,10 +161,23 @@ def main():
         for a in ax:
             a.grid(True)
             a.legend()
+            # Format date ticks
+            # a.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))  # e.g. 'Jan 01, 2024'
+            # a.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))  # e.g. 'Jan 01'
+
+    # Optional: auto-rotate and align
+    fig.autofmt_xdate()  # OR: plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+
     plt.show(block=True)
 
 
 if __name__ == "__main__":
-    # create_zero_sun_berlin()
+    file_in = '2020_Berlin.epw'
+    file_out = '2021_Berlin_no_leap.epw'
+    file_out2 = '2021_Berlin_no_leap_no_sun_dry.epw'
+    path = 'C:/Users/shinterseer/Desktop/GFBAE/GFBAE.Simulation/Example/'
     # check_epw()
-    main()
+    create_no_leap_epw(path + file_in, path + file_out, change_year_to=2021)
+    create_zero_sun_epw(path + file_out, path + file_out2, dry=True)
+
+    # main()
