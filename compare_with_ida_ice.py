@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import datetime
+import numpy as np
 
 
 def create_no_leap_epw(fin, fout, start_date='2020-01-01', change_year_to=None):
@@ -28,7 +29,25 @@ def create_no_leap_epw(fin, fout, start_date='2020-01-01', change_year_to=None):
         epw_clean.to_csv(f, index=False, header=False)
 
 
-def create_zero_sun_epw(fin, fout, dry=False, const_temp=None):
+def dew_point_formula(temp_c, rh, a, b):
+    alpha = np.log(rh / 100.0) + (a * temp_c) / (b + temp_c)
+    return (b * alpha) / (a - alpha)
+
+
+def calculate_dew_point(temp_c, rh):
+    # Step 1: First estimate with water constants
+    a1, b1 = 17.62, 243.12  # Water
+    dew_point = dew_point_formula(temp_c, rh, a1, b1)
+
+    # Step 2: If dew point < 0°C, recalculate with ice constants
+    if dew_point < 0:
+        a2, b2 = 22.46, 272.62  # Ice
+        dew_point = dew_point_formula(temp_c, rh, a2, b2)
+
+    return dew_point
+
+
+def create_simplified_epw(fin, fout, no_sun=False, dry_air=False, no_rain=False, const_temp=None):
     # Read the header lines separately
     with open(fin, 'r') as f:
         header_lines = [next(f) for _ in range(8)]
@@ -36,20 +55,28 @@ def create_zero_sun_epw(fin, fout, dry=False, const_temp=None):
     # Read the rest as data
     data = pd.read_csv(fin, skiprows=8, header=None)
 
-    # zero out everything with light and irradiation
-    # Zero out Extraterrestrial Horizontal Radiation, Extraterrestrial Direct Normal Radiation, Horizontal Infrared Radiation Intensity
-    data.iloc[:, 10:13] = 0
+    if no_sun:
+        # zero out everything with light and irradiation
+        # Zero out Extraterrestrial Horizontal Radiation, Extraterrestrial Direct Normal Radiation, Horizontal Infrared Radiation Intensity
+        data.iloc[:, 10:13] = 0
 
-    # Zero out solar radiation columns (GHI, DNI, DHI, IR radiation)
-    data.iloc[:, 13:17] = 0
+        # Zero out solar radiation columns (GHI, DNI, DHI, IR radiation)
+        data.iloc[:, 13:17] = 0
 
-    # Zero out Direct Normal Illuminance, Diffuse Horizontal Illuminance, Zenith Luminance
-    data.iloc[:, 17:20] = 0
+        # Zero out Direct Normal Illuminance, Diffuse Horizontal Illuminance, Zenith Luminance
+        data.iloc[:, 17:20] = 0
 
     # make climate completely waterless
-    if dry:
-        data.iloc[:, 7] = -70
-        data.iloc[:, 8] = 0
+    if dry_air:
+        # relative humidity and dew point
+        data.iloc[:, 8] = 1
+        data.iloc[:, 7] = data.apply(lambda row: calculate_dew_point(row.iloc[6], row.iloc[8]), axis=1)
+
+    if no_rain:
+        data.iloc[:, 26] = 9 # no weather observation (no precipitation => ignore col 27)
+        data.iloc[:, 28] = 0
+        data.iloc[:, 33] = 0
+        data.iloc[:, 34] = 0
 
     # set constant temperature
     if const_temp is not None:
@@ -103,18 +130,22 @@ def main():
     # filename_ida = '20250604_Results.csv'
     floor_key = 'Floor - Crawl space, Deg-C'
     # filename_ida = '20250605_Results_no_sun.csv'
-    # filename_ida = '20250623_Results.csv'
-    filename_ida = '20250616_hovering_Results_no_sun.csv'
+    # filename_ida = '20250624_Results_no_sun.csv'
+    # filename_ida = '20250624_Results_no_sun_dry.csv'
+    # filename_ida = '20250624_Results_no_leap_no_sun_t0.csv'
+    filename_ida = '20250624_Results_no_leap_no_sun_dry_t0.csv'
 
     path = 'C:/Users/shinterseer/Desktop/GFBAE/IDA_ICE_Simulation_20250521/'
     df_ida = pd.read_csv(path + filename_ida)
-    base_time = pd.Timestamp('2020')
+    base_time = pd.Timestamp('2021')
     df_ida['datetime'] = df_ida['Time'].apply(lambda h: base_time + pd.Timedelta(hours=h))
     df_ida.index = df_ida['datetime']
     df_ida.drop(columns=['Time', 'datetime'], inplace=True)
 
-    filename_iso = 'SimulationResults_without_sun_20250605.csv'
+    # filename_iso = 'SimulationResults_without_sun_20250605.csv'
     # filename_iso = 'SimulationResults_with_sun_20250623.csv'
+    # filename_iso = 'SimulationResults_20250624_no_leap_no_sun_t0.csv'
+    filename_iso = 'SimulationResults_20250624_no_leap_no_sun_dry_t0.csv'
     df_iso52k = pd.read_csv(filename_iso, index_col=0)
     df_iso52k.index = pd.to_datetime(df_iso52k.index)
 
@@ -174,10 +205,9 @@ def main():
 if __name__ == "__main__":
     file_in = '2020_Berlin.epw'
     file_out = '2021_Berlin_no_leap.epw'
-    file_out2 = '2021_Berlin_no_leap_no_sun_dry.epw'
+    file_out2 = '2021_Berlin_no_leap_no_sun_t0.epw'
     path = 'C:/Users/shinterseer/Desktop/GFBAE/GFBAE.Simulation/Example/'
-    # check_epw()
-    create_no_leap_epw(path + file_in, path + file_out, change_year_to=2021)
-    create_zero_sun_epw(path + file_out, path + file_out2, dry=True)
+    # create_no_leap_epw(path + file_in, path + file_out, change_year_to=2021)
+    create_simplified_epw(path + file_out, path + file_out2, dry_air=False, no_rain=False, const_temp=0)
 
-    # main()
+    main()

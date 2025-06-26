@@ -1,10 +1,12 @@
 import numpy as np
 from scipy.optimize import minimize
+from scipy.optimize import basinhopping
 import time
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates  # format datetime axis
 import copy
 import pandas as pd
+
 
 
 class ShoeBox:
@@ -352,12 +354,20 @@ def main_script():
         shoebox = ShoeBox(lengths=lengths, u_value=u_value, therm_sto=therm_sto)
         # shoebox = ShoeBox(lengths=lengths, therm_sto=therm_sto)
 
-        minimize_results = minimize(cost_wrapper, heating_power_initial,  # method="Powell",
-                                    args=(shoebox, temperature_outside_series, time_delta, power_weight_curve,
-                                          temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight),
-                                    bounds=bounds)
+        # minimize_results = minimize(cost_wrapper, heating_power_initial,  # method="Nelder-Mead", #method="Powell",
+        #                             args=(shoebox, temperature_outside_series, time_delta, power_weight_curve,
+        #                                   temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight),
+        #                             bounds=bounds)
+
+
+        # func_parial = partial(cost_wrapper())
+        wrapped_func = lambda x: cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
+                                          temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight)
+        minimize_results = basinhopping(wrapped_func, heating_power_initial)
+
 
         actuation_sequence = minimize_results.x
+        heating_power_initial = minimize_results.x
 
         shoebox_fresh = ShoeBox(lengths)
         postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
