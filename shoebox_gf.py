@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates  # format datetime axis
 import copy
 import pandas as pd
+import pickle
 
 
 class ShoeBox:
@@ -113,12 +114,16 @@ def cost_function_demand_response(heating_strategy, power_weight_curve,
     heating_strategy = np.minimum(heating_strategy, heating_max)
 
     power_penalty_array = heating_strategy * power_weight_curve
-    comfort_penalty_base_array = (temperature_operative_series - 0.5 * (temperature_max - temperature_min)) / comfort_penalty_weight
+    comfort_penalty_base_array = (temperature_operative_series - 0.5 * (temperature_max + temperature_min)) / comfort_penalty_weight
     comfort_penalty_soft_array = (np.maximum(temperature_operative_series - temperature_max - .1, 0)
                                   + np.maximum(temperature_min + .1 - temperature_operative_series, 0)) / np.sqrt(comfort_penalty_weight)
     comfort_penalty_hard_array = (np.maximum(temperature_operative_series - temperature_max, 0)
                                   + np.maximum(temperature_min - temperature_operative_series, 0))
     comfort_penalty_array = comfort_penalty_base_array + comfort_penalty_soft_array + comfort_penalty_hard_array
+    # comfort_penalty_array = comfort_penalty_base_array
+
+    if max(comfort_penalty_hard_array) > 0:
+        x = 0
 
     return {"cost_total": (power_penalty_weight * power_penalty_array.sum()
                            + comfort_penalty_weight * comfort_penalty_array.sum()
@@ -134,9 +139,12 @@ def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, delta_ti
     shoebox_copy = copy.deepcopy(shoebox)
     temperature_operative_series = model(shoebox_copy, heating_strategy, temperature_outside_series, delta_time, substeps_per_actuation)
     # return cost_function_temperature_setpoint(temperature_operative_series, temperature_setpoint)
-    return cost_function_demand_response(np.repeat(heating_strategy, substeps_per_actuation), power_weight_curve,
-                                         temperature_operative_series, temperature_max, temperature_min,
-                                         comfort_penalty_weight=comfort_penalty_weight, control_penalty_weight=control_penalty_weight)["cost_total"]
+
+    cost_dict = cost_function_demand_response(np.repeat(heating_strategy, substeps_per_actuation), power_weight_curve,
+                                              temperature_operative_series, temperature_max, temperature_min,
+                                              comfort_penalty_weight=comfort_penalty_weight, control_penalty_weight=control_penalty_weight)
+    # return np.dot(cost_dict['cost_comfort'], cost_dict['cost_comfort']) #+ np.dot(cost_dict['cost_control'], cost_dict['cost_control'])
+    return cost_dict['cost_total']
 
 
 def get_load_curve(filename="Lastprofile VDEW_alle.csv", key="Haushalt_Winter"):
@@ -267,12 +275,13 @@ def post_proc(postproc_dict, actuation_sequence, power_weight_curve):
 
     ax_cost_comfort = axes[1, 1]
     ax_cost_comfort.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    ax_cost_comfort.plot(array_to_time_series(postproc_dict["cost_comfort"]), label="cost comfort")
+    ax_cost_comfort.plot(array_to_time_series(postproc_dict["cost_comfort"]), label="cost comfort", color='orange')
     ax_cost_comfort.grid()
     ax_cost_comfort.legend()
     ax_cost_comfort2 = ax_cost_comfort.twinx()
     ax_cost_comfort2.plot(array_to_time_series(postproc_dict["temperature_operative"]), label="T_op")
 
+    plt.tight_layout()
     plt.show(block=True)
     x = 0
 
@@ -303,7 +312,7 @@ def get_basic_parameters():
     bounds = [(0, 6000)] * num_actuation_steps
 
     # Initial control actions
-    heating_power_initial = np.array([1000] * num_actuation_steps)
+    heating_power_initial = np.array([500] * num_actuation_steps)
 
     lengths = (5, 5, 5)
     return {"lengths": lengths,
@@ -370,15 +379,23 @@ def main_script():
         shoebox = ShoeBox(lengths=lengths, u_value=u_value, therm_sto=therm_sto)
         # shoebox = ShoeBox(lengths=lengths, therm_sto=therm_sto)
 
-        # minimize_results = minimize(cost_wrapper, heating_power_initial,  # method="Nelder-Mead", #method="Powell",
-        #                             args=(shoebox, temperature_outside_series, time_delta, power_weight_curve,
-        #                                   temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight),
-        #                             bounds=bounds)
+        minimize_results = minimize(cost_wrapper, heating_power_initial,
 
-        # func_parial = partial(cost_wrapper())
-        wrapped_func = lambda x: cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
-                                              temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight, control_penalty_weight)
-        minimize_results = basinhopping(wrapped_func, heating_power_initial, niter=20)
+                                    # method='BFGS',
+                                    # options={
+                                    #     'gtol': 1e-10,
+                                    #     'eps': 1e-8,
+                                    #     'maxiter': 10000,
+                                    #     'disp': True
+                                    # },
+
+                                    args=(shoebox, temperature_outside_series, time_delta, power_weight_curve,
+                                          temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight),
+                                    bounds=bounds)
+
+        # wrapped_func = lambda x: cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
+        #                                       temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight, control_penalty_weight)
+        # minimize_results = basinhopping(wrapped_func, heating_power_initial, niter=20)
 
         actuation_sequence = minimize_results.x
 
