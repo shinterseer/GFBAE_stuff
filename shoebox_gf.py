@@ -56,6 +56,58 @@ class ShoeBox:
         self.temperature_storage += dT_storage
 
 
+def pso(cost_fn, dim, n_particles=30, n_iters=100,
+        bounds=(0, 1), w=0.7, c1=1.5, c2=1.5, print_every=100, stepsize=1, randomness=0):
+    # Bounds
+    lb, ub = np.array(bounds[0]), np.array(bounds[1])
+    lb = np.full(dim, lb) if np.isscalar(lb) else lb
+    ub = np.full(dim, ub) if np.isscalar(ub) else ub
+
+    # Initialize particles
+    pos = np.random.uniform(lb, ub, size=(n_particles, dim))
+    vel = np.zeros((n_particles, dim))
+    pbest = pos.copy()
+    pbest_val = np.array([cost_fn(p) for p in pbest])
+
+    gbest_idx = np.argmin(pbest_val)
+    gbest = pbest[gbest_idx].copy()
+    gbest_val = pbest_val[gbest_idx]
+
+    for it in range(n_iters):
+        r1 = np.random.rand(n_particles, dim)
+        r2 = np.random.rand(n_particles, dim)
+
+        # Update velocity and position
+        random_direction = np.random.randn(*vel.shape)
+        vel = (w * vel
+               + c1 * r1 * (pbest - pos)
+               + c2 * r2 * (gbest - pos)
+               + randomness * random_direction)
+
+
+        pos += stepsize * vel
+        pos = np.clip(pos, lb, ub)
+
+        # Evaluate
+        vals = np.array([cost_fn(p) for p in pos])
+
+        # Update personal best
+        better = vals < pbest_val
+        pbest[better] = pos[better]
+        pbest_val[better] = vals[better]
+
+        # Update global best
+        gbest_idx = np.argmin(pbest_val)
+        if pbest_val[gbest_idx] < gbest_val:
+            gbest_val = pbest_val[gbest_idx]
+            gbest = pbest[gbest_idx].copy()
+
+        if it % print_every == 0:
+            print(f"Iter {it + 1}: Best cost = {gbest_val:.4f}")
+
+    return gbest, gbest_val
+
+
 def model(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation):
     """
     this now has to compute the shoebox the whole day
@@ -165,7 +217,7 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
 
 
 def get_postproc_info(shoebox, actuation_sequence, temperature_outside, time_delta, power_weight_curve,
-                      temperature_max, temperature_min, substeps_per_actuation, comfort_penalty_weight):
+                      temperature_max, temperature_min, substeps_per_actuation, comfort_penalty_weight=1.e5):
     actuation_sequence = np.repeat(actuation_sequence, substeps_per_actuation)
     dim = len(actuation_sequence)
     total_energy_turnover = time_delta * np.sum(np.abs(actuation_sequence))
@@ -377,27 +429,37 @@ def main_script():
 
         start_time = time.time()
         shoebox = ShoeBox(lengths=lengths, u_value=u_value, therm_sto=therm_sto)
-        # shoebox = ShoeBox(lengths=lengths, therm_sto=therm_sto)
 
-        minimize_results = minimize(cost_wrapper, heating_power_initial,
+        # minimize_results = minimize(cost_wrapper, heating_power_initial,
+        #
+        #                             # method='BFGS',
+        #                             # options={
+        #                             #     'gtol': 1e-10,
+        #                             #     'eps': 1e-8,
+        #                             #     'maxiter': 10000,
+        #                             #     'disp': True
+        #                             # },
+        #
+        #                             args=(shoebox, temperature_outside_series, time_delta, power_weight_curve,
+        #                                   temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight),
+        #                             bounds=bounds)
 
-                                    # method='BFGS',
-                                    # options={
-                                    #     'gtol': 1e-10,
-                                    #     'eps': 1e-8,
-                                    #     'maxiter': 10000,
-                                    #     'disp': True
-                                    # },
+        def wrapped_func(x):
+            return cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
+                                temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight, control_penalty_weight)
 
-                                    args=(shoebox, temperature_outside_series, time_delta, power_weight_curve,
-                                          temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight),
-                                    bounds=bounds)
+        solution = pso(wrapped_func, dim=24, n_particles=300, n_iters=200, print_every=10, bounds=(0, 6000), stepsize=50, c1=1, c2=1, randomness=1)
+        actuation_sequence = solution[0]
+
+        # def pso(cost_fn, dim, n_particles=30, n_iters=100,
+        #         bounds=(0, 1), w=0.7, c1=1.5, c2=1.5, print_every=100):
+
 
         # wrapped_func = lambda x: cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
         #                                       temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight, control_penalty_weight)
         # minimize_results = basinhopping(wrapped_func, heating_power_initial, niter=20)
 
-        actuation_sequence = minimize_results.x
+        # actuation_sequence = minimize_results.x
 
         shoebox_fresh = ShoeBox(lengths)
         postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
@@ -437,7 +499,7 @@ def main_script():
     post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
 
 
-def plot_peak_alignment(filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", x_label=None):
+def plot_grid_stress_index(filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", x_label=None):
     df = pd.read_csv(filename, index_col=0)
     temperature_outside_series = get_basic_parameters()["temperature_outside_series"]
     time_delta = get_basic_parameters()["time_delta"]
@@ -491,8 +553,12 @@ if __name__ == "__main__":
     # pp_script("20250509_actuation_results_u0.3_tc3.6e+06_cpwV.csv")
     # pp_script(filename="20250509_actuation_results_uV_tc3.6e+06_cpw1.0e+07.csv", plot_column_index=0, plot_peak_alignment=False,
     #           x_label="u-value in W/m2k")
-    # plot_peak_alignment(filename="20250509_actuation_results_u0.3_tcV_cpw1.0e+07.csv", plot_peak_alignment=True,
-    #                     x_label="thermal capacity in J/K")
+
+    # plot_grid_stress_index(filename="20250509_actuation_results_u0.3_tcV_cpw1.0e+07.csv",
+    #                        x_label="thermal capacity in J/K")
+    #
+    # plot_grid_stress_index(filename="20250509_actuation_results_uV_tc3.6e+06_cpw1.0e+07.csv",
+    #                        x_label="thermal transmittance in W/m2K")
 
     # shoebox = ShoeBox(lengths=(5, 5, 5), u_value=.3, therm_sto=3.6e6)
     # pp_from_file(filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", column_index=2, shoebox=shoebox, comfort_penalty_weight=1000.)
