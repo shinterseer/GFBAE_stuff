@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 
 
 def pso(cost_fn, dim, n_particles=30, n_iters=100,
-        bounds=(0, 1), w=0.7, c1=1., c2=1.1, print_every=False, stepsize=1, randomness=0, visualize=False):
+        bounds=(0, 1), w=0.7, c1=1., c2=1.1, print_every=False, stepsize=1, randomness=0, visualize=False, checking_pos=False, seed=0):
+    np.random.seed(seed)
     # Bounds
     lb, ub = np.array(bounds[0]), np.array(bounds[1])
     lb = np.full(dim, lb) if np.isscalar(lb) else lb
@@ -14,7 +15,7 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
     pos = np.random.uniform(lb, ub, size=(n_particles, dim))
     vel = np.zeros((n_particles, dim))
     pbest = pos.copy()
-    pbest_val = np.array([cost_fn(p) for p in pbest])
+    pbest_val = np.array([cost_fn(p)['cost_total'] for p in pbest])
 
     gbest_idx = np.argmin(pbest_val)
     gbest = pbest[gbest_idx].copy()
@@ -43,7 +44,8 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
         pos = np.clip(pos, lb, ub)
 
         # Evaluate
-        vals = np.array([cost_fn(p) for p in pos])
+        vals = np.array([cost_fn(p)['cost_total'] for p in pos])
+
 
         # Update personal best
         better = vals < pbest_val
@@ -59,20 +61,33 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
         if print_every is not None and it % print_every == 0:
             print(f"Iter {it + 1}/{n_iters}: Best cost = {gbest_val:.2e}, "
                   f"time per iteration = {time.time() - start_time:.2e} s")
+            if checking_pos:
+                check_cost(gbest, cost_fn)
             if visualize:
                 visualization(vel_final, pos, pbest, pbest_val, gbest, gbest_val)
 
+    print('pso done')
+    check_cost(gbest, cost_fn)
     return gbest, gbest_val
+
+
+def check_cost(pos, cost_fn):
+    print(f'actuation strat: {pos}')
+    print(f'cost total: {cost_fn(pos)["cost_total"]:.2e}, cost comfort:  {cost_fn(pos)["cost_comfort"].sum():.2e}')
 
 
 def visualization(vel, pos, pbest, pbest_val, gbest, gbest_val):
     x = 0
 
     fig, axs = plt.subplots(nrows=2, ncols=2)
+    axs[0, 0].set_title("new position")
+    axs[0, 1].set_title("velocity")
     for particle in range(pos.shape[0]):
         # axs[0, 0].plot(pos[particle, :], color=(0, 0, 0, .1))
-        axs[0, 0].set_title("new position")
         axs[0, 0].step(range(24), pos[particle, :], where='post', color=(0, 0, 0, .1))
-        axs[0, 1].set_title("velocity")
         axs[0, 1].step(range(24), vel[particle, :], where='post', color=(0, 0, 0, .1))
+
+    axs[1, 0].set_title("best")
+    axs[1, 0].step(range(24), gbest, where='post', color=(0, 0, 0, 1))
+
     plt.show(block=True)
