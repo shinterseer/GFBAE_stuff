@@ -7,6 +7,7 @@ import matplotlib.dates as mdates  # format datetime axis
 import copy
 import pandas as pd
 import pickle
+import pso
 
 
 class ShoeBox:
@@ -54,58 +55,6 @@ class ShoeBox:
         dT_storage = (heating_to_storage + air_to_storage - storage_to_outside) / self.capacity_storage * time_delta
         self.temperature_air += dT_air
         self.temperature_storage += dT_storage
-
-
-def pso(cost_fn, dim, n_particles=30, n_iters=100,
-        bounds=(0, 1), w=0.7, c1=1.5, c2=1.5, print_every=100, stepsize=1, randomness=0):
-    # Bounds
-    lb, ub = np.array(bounds[0]), np.array(bounds[1])
-    lb = np.full(dim, lb) if np.isscalar(lb) else lb
-    ub = np.full(dim, ub) if np.isscalar(ub) else ub
-
-    # Initialize particles
-    pos = np.random.uniform(lb, ub, size=(n_particles, dim))
-    vel = np.zeros((n_particles, dim))
-    pbest = pos.copy()
-    pbest_val = np.array([cost_fn(p) for p in pbest])
-
-    gbest_idx = np.argmin(pbest_val)
-    gbest = pbest[gbest_idx].copy()
-    gbest_val = pbest_val[gbest_idx]
-
-    for it in range(n_iters):
-        r1 = np.random.rand(n_particles, dim)
-        r2 = np.random.rand(n_particles, dim)
-
-        # Update velocity and position
-        random_direction = np.random.randn(*vel.shape)
-        vel = (w * vel
-               + c1 * r1 * (pbest - pos)
-               + c2 * r2 * (gbest - pos)
-               + randomness * random_direction)
-
-
-        pos += stepsize * vel
-        pos = np.clip(pos, lb, ub)
-
-        # Evaluate
-        vals = np.array([cost_fn(p) for p in pos])
-
-        # Update personal best
-        better = vals < pbest_val
-        pbest[better] = pos[better]
-        pbest_val[better] = vals[better]
-
-        # Update global best
-        gbest_idx = np.argmin(pbest_val)
-        if pbest_val[gbest_idx] < gbest_val:
-            gbest_val = pbest_val[gbest_idx]
-            gbest = pbest[gbest_idx].copy()
-
-        if it % print_every == 0:
-            print(f"Iter {it + 1}: Best cost = {gbest_val:.4f}")
-
-    return gbest, gbest_val
 
 
 def model(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation):
@@ -448,12 +397,12 @@ def main_script():
             return cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
                                 temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight, control_penalty_weight)
 
-        solution = pso(wrapped_func, dim=24, n_particles=300, n_iters=200, print_every=10, bounds=(0, 6000), stepsize=50, c1=1, c2=1, randomness=1)
+        solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=1000, print_every=10, bounds=(0, 6000),
+                           stepsize=200, c1=1, c2=1, randomness=0.1, visualize=False)
         actuation_sequence = solution[0]
 
         # def pso(cost_fn, dim, n_particles=30, n_iters=100,
         #         bounds=(0, 1), w=0.7, c1=1.5, c2=1.5, print_every=100):
-
 
         # wrapped_func = lambda x: cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
         #                                       temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight, control_penalty_weight)
