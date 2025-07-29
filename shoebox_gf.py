@@ -66,6 +66,9 @@ def model(shoebox, heating_strategy, temperature_outside_series, time_delta, sub
 
     num_actuation_steps = heating_strategy.size
     temperature_operative_series = np.empty(num_actuation_steps * substeps_per_actuation)
+    temperature_surface_series = np.empty(num_actuation_steps * substeps_per_actuation)
+    temperature_air_series = np.empty(num_actuation_steps * substeps_per_actuation)
+    temperature_storage_series = np.empty(num_actuation_steps * substeps_per_actuation)
 
     # loop over timesteps
     for i in range(num_actuation_steps):
@@ -73,9 +76,16 @@ def model(shoebox, heating_strategy, temperature_outside_series, time_delta, sub
             shoebox.timestep(heating_strategy[i], temperature_outside_series[i], time_delta=time_delta)
             # register operative temperature
             temperature_operative_series[i * substeps_per_actuation + j] = shoebox.get_operative_temperature()
+            temperature_surface_series[i * substeps_per_actuation + j] = shoebox.get_surface_temperature()
+            temperature_air_series[i * substeps_per_actuation + j] = shoebox.temperature_air
+            temperature_storage_series[i * substeps_per_actuation + j] = shoebox.temperature_storage
 
-    # return temperature_operative_series
-    return temperature_operative_series
+    result_dict = {'temperature_operative_series': temperature_operative_series,
+                   'temperature_surface_series': temperature_surface_series,
+                   'temperature_air_series': temperature_air_series,
+                   'temperature_storage_series': temperature_storage_series}
+
+    return result_dict
 
 
 def cost_function_temperature_setpoint(T_history, T_setpoint):
@@ -138,8 +148,8 @@ def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, delta_ti
                  power_weight_curve, temperature_min, temperature_max, substeps_per_actuation,
                  comfort_penalty_weight=1.e5, control_penalty_weight=1.e6, return_full_dict=False):
     shoebox_copy = copy.deepcopy(shoebox)
-    temperature_operative_series = model(shoebox_copy, heating_strategy, temperature_outside_series, delta_time, substeps_per_actuation)
-    # return cost_function_temperature_setpoint(temperature_operative_series, temperature_setpoint)
+    result_dict = model(shoebox_copy, heating_strategy, temperature_outside_series, delta_time, substeps_per_actuation)
+    temperature_operative_series = result_dict['temperature_operative_series']
 
     cost_dict = cost_function_demand_response(np.repeat(heating_strategy, substeps_per_actuation), power_weight_curve,
                                               temperature_operative_series, temperature_max, temperature_min,
@@ -169,52 +179,54 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
 
 def get_postproc_info(shoebox, actuation_sequence, temperature_outside, time_delta, power_weight_curve,
                       temperature_max, temperature_min, substeps_per_actuation, comfort_penalty_weight=1.e5):
-    actuation_sequence = np.repeat(actuation_sequence, substeps_per_actuation)
+    # actuation_sequence = np.repeat(actuation_sequence, substeps_per_actuation)
     dim = len(actuation_sequence)
     total_energy_turnover = time_delta * np.sum(np.abs(actuation_sequence))
-    grid_burden = time_delta * np.dot(actuation_sequence, power_weight_curve)
+    grid_burden = time_delta * np.dot(np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve)
     peak_alignment_factor = grid_burden / total_energy_turnover
 
-    temperature_storage = np.empty(dim + 1)
-    temperature_air = np.empty(dim + 1)
-    temperature_operative = np.empty(dim + 1)
-    temperature_supply = np.empty(dim + 1)
-    temperature_surface = np.empty(dim + 1)
-    cost_power = np.empty(dim + 1)
-    cost_comfort = np.empty(dim + 1)
+    temperature_storage = np.empty(dim)
+    temperature_air = np.empty(dim)
+    temperature_operative = np.empty(dim)
+    temperature_supply = np.empty(dim)
+    temperature_surface = np.empty(dim)
+    # cost_power = np.empty(dim + 1)
+    # cost_comfort = np.empty(dim + 1)
 
-    temperature_storage[0] = shoebox.temperature_storage
-    temperature_air[0] = shoebox.temperature_air
-    temperature_operative[0] = shoebox.get_operative_temperature()
-    temperature_supply[0] = shoebox.temperature_air
-    temperature_surface[0] = shoebox.get_surface_temperature()
-    cost_power[0] = 0
-    cost_comfort[0] = 0
+    # temperature_storage[0] = shoebox.temperature_storage
+    # temperature_air[0] = shoebox.temperature_air
+    # temperature_operative[0] = shoebox.get_operative_temperature()
+    # temperature_supply[0] = shoebox.temperature_air
+    # temperature_surface[0] = shoebox.get_surface_temperature()
+    # cost_power[0] = 0
+    # cost_comfort[0] = 0
 
-    # temperature_operative = model(shoebox, actuation_sequence, temperature_outside, time_delta, 1)
-    for k in range(dim):
-        u = actuation_sequence[k]
-        te = temperature_outside[k]
-        shoebox.timestep(u, te, time_delta)
-        temperature_storage[k + 1] = shoebox.temperature_storage
-        temperature_air[k + 1] = shoebox.temperature_air
-        temperature_operative[k + 1] = shoebox.get_operative_temperature()
-        temperature_supply[k + 1] = shoebox.temperature_supply
-        temperature_surface[k + 1] = shoebox.get_surface_temperature()
-        # cost_power[k + 1], cost_comfort[k + 1] = cost_function_demand_response_single(u, power_weight_curve.iloc[k],
-        #                                                                               temperature_operative[k + 1],
-        #                                                                               temperature_max, temperature_min,
-        #                                                                               comfort_penalty_weight=comfort_penalty_weight)
+    result_dict = model(shoebox, heating_strategy=actuation_sequence, temperature_outside_series=temperature_outside,
+                        time_delta=time_delta, substeps_per_actuation=substeps_per_actuation)
 
-    cost_dict = cost_function_demand_response(actuation_sequence, power_weight_curve,
+    # for k in range(dim):
+    #     u = actuation_sequence[k]
+    #     te = temperature_outside[k]
+    #     shoebox.timestep(u, te, time_delta)
+    #     temperature_storage[k + 1] = shoebox.temperature_storage
+    #     temperature_air[k + 1] = shoebox.temperature_air
+    #     temperature_operative[k + 1] = shoebox.get_operative_temperature()
+    #     temperature_supply[k + 1] = shoebox.temperature_supply
+    #     temperature_surface[k + 1] = shoebox.get_surface_temperature()
+    # cost_power[k + 1], cost_comfort[k + 1] = cost_function_demand_response_single(u, power_weight_curve.iloc[k],
+    #                                                                               temperature_operative[k + 1],
+    #                                                                               temperature_max, temperature_min,
+    #                                                                               comfort_penalty_weight=comfort_penalty_weight)
+
+    cost_dict = cost_function_demand_response(np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve,
                                               temperature_operative, temperature_max, temperature_min,
                                               comfort_penalty_weight=comfort_penalty_weight)
 
-    return {"temperature_air": temperature_air,
-            "temperature_storage": temperature_storage,
-            "temperature_operative": temperature_operative,
-            "temperature_supply": temperature_supply,
-            "temperature_surface": temperature_surface,
+    return {"temperature_air": result_dict['temperature_air_series'],
+            "temperature_storage": result_dict['temperature_storage_series'],
+            "temperature_operative": result_dict['temperature_operative_series'],
+            # "temperature_supply": temperature_supply,
+            "temperature_surface": result_dict['temperature_surface_series'],
             "cost_power": cost_dict['cost_power'],
             "cost_comfort": cost_dict['cost_comfort'],
             "cost_control": cost_dict['cost_control'],
@@ -378,16 +390,19 @@ def main_script():
         # comfort_penalty_weight = comfort_penalty_weights[i]
 
         start_time = time.time()
-        shoebox = ShoeBox(lengths=lengths, u_value=u_value, therm_sto=therm_sto)
+        shoebox = ShoeBox(temp_init=20, lengths=lengths, u_value=u_value, therm_sto=therm_sto)
+        shoebox_init = copy.deepcopy(shoebox)
 
         def wrapped_func(x):
             return cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
                                 temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight, control_penalty_weight, return_full_dict=True)
 
-        solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=300, print_every=10, bounds=(0, 6000),
-                           stepsize=200, c1=1, c2=1, randomness=0.1, visualize=False)
+        solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=600, print_every=10, bounds=(0, 6000),
+                           stepsize=500, c1=1, c2=1, randomness=.5, visualize=False)
         actuation_sequence = solution[0]
-        pso.check_cost(actuation_sequence, wrapped_func)
+
+        # print('checking cost from main with wrapped_func - cost_wrapper')
+        # pso.check_cost(actuation_sequence, wrapped_func)
 
         # minimize_results = minimize(cost_wrapper, heating_power_initial,
         #
@@ -406,8 +421,7 @@ def main_script():
         # minimize_results = basinhopping(wrapped_func, heating_power_initial, niter=20)
         # actuation_sequence = minimize_results.x
 
-
-        shoebox_fresh = ShoeBox(lengths)
+        shoebox_fresh = copy.deepcopy(shoebox_init)
         postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
                                           temperature_outside=temperature_outside_series, time_delta=time_delta,
                                           power_weight_curve=power_weight_curve,

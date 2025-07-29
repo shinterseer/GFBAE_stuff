@@ -66,8 +66,8 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
             if visualize:
                 visualization(vel_final, pos, pbest, pbest_val, gbest, gbest_val)
 
-    print('pso done')
-    check_cost(gbest, cost_fn)
+    # print('pso done')
+    # check_cost(gbest, cost_fn)
     return gbest, gbest_val
 
 
