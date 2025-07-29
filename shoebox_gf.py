@@ -409,7 +409,7 @@ def main_script():
         #                  power_weight_curve, temperature_min, temperature_max, substeps_per_actuation,
         #                  comfort_penalty_weight=1.e5, control_penalty_weight=1.e6, return_full_dict=False):
 
-        solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=600, print_every=50, bounds=(0, 6000),
+        solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=300, print_every=50, bounds=(0, 6000),
                            stepsize=500, c1=1, c2=1, randomness=.5, visualize=False, num_processes=1)
         actuation_sequence = solution[0]
 

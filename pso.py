@@ -7,23 +7,23 @@ from multiprocessing import Pool
 def pso(cost_fn, dim, n_particles=30, n_iters=100,
         bounds=(0, 1), w=0.7, c1=1., c2=1., print_every=False, stepsize=1, randomness=0,
         visualize=False, checking_pos=False, seed=0, num_processes=1):
-    np.random.seed(seed)
-    # Bounds
-    lb, ub = np.array(bounds[0]), np.array(bounds[1])
-    lb = np.full(dim, lb) if np.isscalar(lb) else lb
-    ub = np.full(dim, ub) if np.isscalar(ub) else ub
 
-    # Initialize particles
-    pos = np.random.uniform(lb, ub, size=(n_particles, dim))
-    vel = np.zeros((n_particles, dim))
-    pbest = pos.copy()
-    pbest_val = np.array([cost_fn(p)['cost_total'] for p in pbest])
+    def pso_body(mapper):
+        np.random.seed(seed)
+        # Bounds
+        lb, ub = np.array(bounds[0]), np.array(bounds[1])
+        lb = np.full(dim, lb) if np.isscalar(lb) else lb
+        ub = np.full(dim, ub) if np.isscalar(ub) else ub
 
-    gbest_idx = np.argmin(pbest_val)
-    gbest = pbest[gbest_idx].copy()
-    gbest_val = pbest_val[gbest_idx]
+        # Initialize particles
+        pos = np.random.uniform(lb, ub, size=(n_particles, dim))
+        vel = np.zeros((n_particles, dim))
+        pbest = pos.copy()
+        pbest_val = np.array([cost_fn(p)['cost_total'] for p in pbest])
 
-    with Pool(processes=num_processes) as pool:
+        gbest_idx = np.argmin(pbest_val)
+        gbest = pbest[gbest_idx].copy()
+        gbest_val = pbest_val[gbest_idx]
 
         for it in range(n_iters):
             start_time = time.time()
@@ -50,7 +50,7 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
             # Evaluate
             # vals = np.array([cost_fn(p)['cost_total'] for p in pos])
 
-            list_of_pbest_val = pool.map(cost_fn, pos)
+            list_of_pbest_val = mapper(cost_fn, pos)
             vals = np.array([p['cost_total'] for p in list_of_pbest_val])
 
             # Update personal best
@@ -71,6 +71,16 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
                     check_cost(gbest, cost_fn)
                 if visualize:
                     visualization(vel_final, pos, pbest, pbest_val, gbest, gbest_val)
+
+        return gbest, gbest_val
+
+    if num_processes > 1:
+        with Pool(processes=num_processes) as pool:
+            mapper = pool.map
+            gbest, gbest_val = pso_body(mapper)
+    else:
+        mapper = map
+        gbest, gbest_val = pso_body(mapper)
 
     return gbest, gbest_val
 
