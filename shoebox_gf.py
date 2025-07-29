@@ -7,6 +7,8 @@ import matplotlib.dates as mdates  # format datetime axis
 import copy
 import pandas as pd
 import pickle
+from functools import partial
+
 import pso
 
 
@@ -393,12 +395,22 @@ def main_script():
         shoebox = ShoeBox(temp_init=20, lengths=lengths, u_value=u_value, therm_sto=therm_sto)
         shoebox_init = copy.deepcopy(shoebox)
 
-        def wrapped_func(x):
-            return cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
-                                temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight, control_penalty_weight, return_full_dict=True)
+        # def wrapped_func(x):
+        #     return cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
+        #                         temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight, control_penalty_weight, return_full_dict=True)
 
-        solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=600, print_every=10, bounds=(0, 6000),
-                           stepsize=500, c1=1, c2=1, randomness=.5, visualize=False)
+        wrapped_func = partial(cost_wrapper, shoebox=shoebox, temperature_outside_series=temperature_outside_series,
+                               delta_time=time_delta, power_weight_curve=power_weight_curve,
+                               temperature_min=temperature_min, temperature_max=temperature_max,
+                               substeps_per_actuation=substeps_per_actuation, comfort_penalty_weight=comfort_penalty_weight,
+                               control_penalty_weight=control_penalty_weight, return_full_dict=True)
+
+        # def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, delta_time,
+        #                  power_weight_curve, temperature_min, temperature_max, substeps_per_actuation,
+        #                  comfort_penalty_weight=1.e5, control_penalty_weight=1.e6, return_full_dict=False):
+
+        solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=600, print_every=50, bounds=(0, 6000),
+                           stepsize=500, c1=1, c2=1, randomness=.5, visualize=False, num_processes=1)
         actuation_sequence = solution[0]
 
         # print('checking cost from main with wrapped_func - cost_wrapper')

@@ -48,7 +48,10 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
             pos = np.clip(pos, lb, ub)
 
             # Evaluate
-            vals = np.array([cost_fn(p)['cost_total'] for p in pos])
+            # vals = np.array([cost_fn(p)['cost_total'] for p in pos])
+
+            list_of_pbest_val = pool.map(cost_fn, pos)
+            vals = np.array([p['cost_total'] for p in list_of_pbest_val])
 
             # Update personal best
             better = vals < pbest_val
@@ -69,8 +72,6 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
                 if visualize:
                     visualization(vel_final, pos, pbest, pbest_val, gbest, gbest_val)
 
-    # print('pso done')
-    # check_cost(gbest, cost_fn)
     return gbest, gbest_val
 
 
