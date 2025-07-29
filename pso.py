@@ -1,10 +1,12 @@
 import numpy as np
 import time
 import matplotlib.pyplot as plt
+from multiprocessing import Pool
 
 
 def pso(cost_fn, dim, n_particles=30, n_iters=100,
-        bounds=(0, 1), w=0.7, c1=1., c2=1.1, print_every=False, stepsize=1, randomness=0, visualize=False, checking_pos=False, seed=0):
+        bounds=(0, 1), w=0.7, c1=1., c2=1., print_every=False, stepsize=1, randomness=0,
+        visualize=False, checking_pos=False, seed=0, num_processes=1):
     np.random.seed(seed)
     # Bounds
     lb, ub = np.array(bounds[0]), np.array(bounds[1])
@@ -21,50 +23,51 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
     gbest = pbest[gbest_idx].copy()
     gbest_val = pbest_val[gbest_idx]
 
-    for it in range(n_iters):
-        start_time = time.time()
-        r1 = np.random.rand(n_particles, dim)
-        r2 = np.random.rand(n_particles, dim)
+    with Pool(processes=num_processes) as pool:
 
-        # Update velocity and position
-        random_direction = np.random.randn(*vel.shape)
-        rand_norms = np.linalg.norm(random_direction, axis=1, keepdims=True)  # shape (n_particles, 1)
-        rand_normalized = random_direction / (rand_norms + 1.e-12)  # add epsilon to avoid division by zero
+        for it in range(n_iters):
+            start_time = time.time()
+            r1 = np.random.rand(n_particles, dim)
+            r2 = np.random.rand(n_particles, dim)
 
-        vel = (w * vel
-               + c1 * r1 * (pbest - pos)
-               + c2 * r2 * (gbest - pos))
+            # Update velocity and position
+            random_direction = np.random.randn(*vel.shape)
+            rand_norms = np.linalg.norm(random_direction, axis=1, keepdims=True)  # shape (n_particles, 1)
+            rand_normalized = random_direction / (rand_norms + 1.e-12)  # add epsilon to avoid division by zero
 
-        vel_norms = np.linalg.norm(vel, axis=1, keepdims=True)  # shape (n_particles, 1)
-        vel_normalized = vel / (vel_norms + 1.e-12)  # add epsilon to avoid division by zero
+            vel = (w * vel
+                   + c1 * r1 * (pbest - pos)
+                   + c2 * r2 * (gbest - pos))
 
-        vel_final = stepsize * ((1 - randomness) * vel_normalized + randomness * rand_normalized)
+            vel_norms = np.linalg.norm(vel, axis=1, keepdims=True)  # shape (n_particles, 1)
+            vel_normalized = vel / (vel_norms + 1.e-12)  # add epsilon to avoid division by zero
 
-        pos += vel_final
-        pos = np.clip(pos, lb, ub)
+            vel_final = stepsize * ((1 - randomness) * vel_normalized + randomness * rand_normalized)
 
-        # Evaluate
-        vals = np.array([cost_fn(p)['cost_total'] for p in pos])
+            pos += vel_final
+            pos = np.clip(pos, lb, ub)
 
+            # Evaluate
+            vals = np.array([cost_fn(p)['cost_total'] for p in pos])
 
-        # Update personal best
-        better = vals < pbest_val
-        pbest[better] = pos[better]
-        pbest_val[better] = vals[better]
+            # Update personal best
+            better = vals < pbest_val
+            pbest[better] = pos[better]
+            pbest_val[better] = vals[better]
 
-        # Update global best
-        gbest_idx = np.argmin(pbest_val)
-        if pbest_val[gbest_idx] < gbest_val:
-            gbest_val = pbest_val[gbest_idx]
-            gbest = pbest[gbest_idx].copy()
+            # Update global best
+            gbest_idx = np.argmin(pbest_val)
+            if pbest_val[gbest_idx] < gbest_val:
+                gbest_val = pbest_val[gbest_idx]
+                gbest = pbest[gbest_idx].copy()
 
-        if print_every is not None and it % print_every == 0:
-            print(f"Iter {it + 1}/{n_iters}: Best cost = {gbest_val:.2e}, "
-                  f"time per iteration = {time.time() - start_time:.2e} s")
-            if checking_pos:
-                check_cost(gbest, cost_fn)
-            if visualize:
-                visualization(vel_final, pos, pbest, pbest_val, gbest, gbest_val)
+            if print_every is not None and it % print_every == 0:
+                print(f"Iter {it + 1}/{n_iters}: Best cost = {gbest_val:.2e}, "
+                      f"time per iteration = {time.time() - start_time:.2e} s")
+                if checking_pos:
+                    check_cost(gbest, cost_fn)
+                if visualize:
+                    visualization(vel_final, pos, pbest, pbest_val, gbest, gbest_val)
 
     # print('pso done')
     # check_cost(gbest, cost_fn)
