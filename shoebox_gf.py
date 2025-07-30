@@ -9,18 +9,36 @@ import pandas as pd
 import pickle
 from functools import partial
 
+from numba import float64
+from numba.experimental import jitclass
+from numba import jit
+
 import pso
 
+spec = [
+    ('length1', float64),
+    ('length2', float64),
+    ('length3', float64),
+    ('heat_max', float64),
+    ('delta_temperature_max', float64),
+    ('therm_sto', float64),
+    ('temp_init', float64),
+    ('convective_portion', float64),
+    ('u_value', float64),
+    ('temperature_supply_delta_max', float64),
+]
 
+
+@jitclass(spec)
 class ShoeBox:
-    def __init__(self, lengths, heat_max=6000, delta_temperature_max=40, therm_sto=3.6e6, temp_init=21,
+    def __init__(self, length1, length2, length3, heat_max=6000., delta_temperature_max=40., therm_sto=3.6e6, temp_init=21.,
                  convective_portion=0.3, u_value=0.3, temperature_supply_delta_max=0.05):
         self.temperature_supply = temp_init
         # self.temperature_supply_delta_max = temperature_supply_delta_max
-        self.volume = lengths[0] * lengths[1] * lengths[2]
-        self.area_floor = lengths[0] * lengths[1]
-        self.area_ceiling = lengths[0] * lengths[1]
-        self.area_hull = 2 * lengths[0] * lengths[2] + 2 * lengths[1] * lengths[2]
+        self.volume = length1 * length2 * length3
+        self.area_floor = length1 * length2
+        self.area_ceiling = length1 * length2
+        self.area_hull = 2 * length1 * length3 + 2 * length2 * length3
         air_density = 1.2041  # kg/m3
         air_spec_heat = 1005  # J/K
         self.capacity_air = self.volume * air_spec_heat * air_density  # in J/K
@@ -59,6 +77,7 @@ class ShoeBox:
         self.temperature_storage += dT_storage
 
 
+@jit
 def model(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation):
     """
     this now has to compute the shoebox the whole day
@@ -330,7 +349,7 @@ def get_basic_parameters():
     # Initial control actions
     heating_power_initial = np.array([500] * num_actuation_steps)
 
-    lengths = (5, 5, 5)
+    lengths = np.array((5., 5., 5.))
     return {"lengths": lengths,
             "bounds": bounds,
             "heating_power_initial": heating_power_initial,
@@ -345,6 +364,7 @@ def get_basic_parameters():
             "power_weight_curve": power_weight_curve}
 
 
+@jit
 def main_script():
     # Model parameters
     basic_parameter_dict = get_basic_parameters()
@@ -392,7 +412,16 @@ def main_script():
         # comfort_penalty_weight = comfort_penalty_weights[i]
 
         start_time = time.time()
-        shoebox = ShoeBox(temp_init=20, lengths=lengths, u_value=u_value, therm_sto=therm_sto)
+        # self, length1=lengths, length2=length[1], length3=lengths[2], heat_max=6000, delta_temperature_max=40, therm_sto=therm_sto, temp_init=20,
+        # convective_portion=0.3, u_value=u_value, temperature_supply_delta_max=0.05
+
+
+        # shoebox = ShoeBox(temp_init=20, length1=lengths[0], length2=lengths[1], length3=lengths[2], u_value=u_value, therm_sto=therm_sto)
+        # shoebox = ShoeBox(length1=lengths[0], length2=lengths[1], length3=lengths[2], heat_max=6000, delta_temperature_max=40, therm_sto=therm_sto, temp_init=20,
+        #     convective_portion=0.3, u_value=u_value, temperature_supply_delta_max=0.05)
+        shoebox = ShoeBox(lengths[0], lengths[1], lengths[2], 6000., 40, therm_sto, 20.,
+            0.3, u_value, 0.05)
+
         shoebox_init = copy.deepcopy(shoebox)
 
         # def wrapped_func(x):
@@ -471,7 +500,7 @@ def main_script():
     post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
 
 
-def plot_grid_stress_index(filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", x_label=None):
+def plot_grid_stress_index(shoebox, filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", x_label=None):
     df = pd.read_csv(filename, index_col=0)
     temperature_outside_series = get_basic_parameters()["temperature_outside_series"]
     time_delta = get_basic_parameters()["time_delta"]
@@ -486,7 +515,7 @@ def plot_grid_stress_index(filename="20250508_actuation_results_u0.3_tc3.6e+06_c
     y_vals = list()
     for col in df.columns:
         x_vals.append(float(col))
-        shoebox_fresh = ShoeBox(lengths)
+        shoebox_fresh = copy.deepcopy(shoebox)
         actuation_sequence = df[col].array
         postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
                                           temperature_outside=temperature_outside_series, time_delta=time_delta,
