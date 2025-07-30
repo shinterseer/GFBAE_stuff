@@ -16,22 +16,28 @@ from numba import jit
 import pso
 
 spec = [
-    ('length1', float64),
-    ('length2', float64),
-    ('length3', float64),
+    ('temperature_supply', float64),
+    ('volume', float64),
+    ('area_ceiling', float64),
+    ('area_hull', float64),
+    ('area_floor', float64),
+    ('area_ceiling', float64),
+    ('area_hull', float64),
+    ('air_density', float64),
+    ('air_spec_heat', float64),
+    ('capacity_air', float64),
+    ('capacity_storage', float64),
     ('heat_max', float64),
     ('delta_temperature_max', float64),
-    ('therm_sto', float64),
-    ('temp_init', float64),
+    ('temperature_storage', float64),
+    ('temperature_air', float64),
     ('convective_portion', float64),
-    ('u_value', float64),
-    ('temperature_supply_delta_max', float64),
 ]
 
 
 @jitclass(spec)
 class ShoeBox:
-    def __init__(self, length1, length2, length3, heat_max=6000., delta_temperature_max=40., therm_sto=3.6e6, temp_init=21.,
+    def __init__(self, length1=5., length2=5., length3=5., heat_max=6000., delta_temperature_max=40., therm_sto=3.6e6, temp_init=21.,
                  convective_portion=0.3, u_value=0.3, temperature_supply_delta_max=0.05):
         self.temperature_supply = temp_init
         # self.temperature_supply_delta_max = temperature_supply_delta_max
@@ -39,9 +45,9 @@ class ShoeBox:
         self.area_floor = length1 * length2
         self.area_ceiling = length1 * length2
         self.area_hull = 2 * length1 * length3 + 2 * length2 * length3
-        air_density = 1.2041  # kg/m3
-        air_spec_heat = 1005  # J/K
-        self.capacity_air = self.volume * air_spec_heat * air_density  # in J/K
+        self.air_density = 1.2041  # kg/m3
+        self.air_spec_heat = 1005  # J/K
+        self.capacity_air = self.volume * self.air_spec_heat * self.air_density  # in J/K
         self.capacity_storage = therm_sto  # in J/K
         self.heat_max = heat_max  # in W
         self.delta_temperature_max = delta_temperature_max
@@ -364,7 +370,6 @@ def get_basic_parameters():
             "power_weight_curve": power_weight_curve}
 
 
-@jit
 def main_script():
     # Model parameters
     basic_parameter_dict = get_basic_parameters()
@@ -419,8 +424,12 @@ def main_script():
         # shoebox = ShoeBox(temp_init=20, length1=lengths[0], length2=lengths[1], length3=lengths[2], u_value=u_value, therm_sto=therm_sto)
         # shoebox = ShoeBox(length1=lengths[0], length2=lengths[1], length3=lengths[2], heat_max=6000, delta_temperature_max=40, therm_sto=therm_sto, temp_init=20,
         #     convective_portion=0.3, u_value=u_value, temperature_supply_delta_max=0.05)
-        shoebox = ShoeBox(lengths[0], lengths[1], lengths[2], 6000., 40, therm_sto, 20.,
-            0.3, u_value, 0.05)
+        # shoebox = ShoeBox(lengths[0], lengths[1], lengths[2], 6000., 40, therm_sto, 20.,
+        #     0.3, u_value, 0.05)
+
+        shoebox = ShoeBox(u_value=float64(u_value), therm_sto=therm_sto)
+
+
 
         shoebox_init = copy.deepcopy(shoebox)
 
