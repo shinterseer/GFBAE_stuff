@@ -16,10 +16,12 @@ from numba import jit
 import pso
 
 spec = [
+    ('temp_init', float64),
+    ('length1', float64),
+    ('length2', float64),
+    ('length3', float64),
     ('temperature_supply', float64),
     ('volume', float64),
-    ('area_ceiling', float64),
-    ('area_hull', float64),
     ('area_floor', float64),
     ('area_ceiling', float64),
     ('area_hull', float64),
@@ -32,21 +34,26 @@ spec = [
     ('temperature_storage', float64),
     ('temperature_air', float64),
     ('convective_portion', float64),
+    ('u_value', float64),
+    ('thermal_transmittance', float64),
 ]
 
 
 @jitclass(spec)
 class ShoeBox:
     def __init__(self, length1=5., length2=5., length3=5., heat_max=6000., delta_temperature_max=40., therm_sto=3.6e6, temp_init=21.,
-                 convective_portion=0.3, u_value=0.3, temperature_supply_delta_max=0.05):
+                 convective_portion=0.3, u_value=0.3):
+        self.temp_init = temp_init
+        self.length1 = length1
+        self.length2 = length2
+        self.length3 = length3
         self.temperature_supply = temp_init
-        # self.temperature_supply_delta_max = temperature_supply_delta_max
         self.volume = length1 * length2 * length3
         self.area_floor = length1 * length2
         self.area_ceiling = length1 * length2
         self.area_hull = 2 * length1 * length3 + 2 * length2 * length3
         self.air_density = 1.2041  # kg/m3
-        self.air_spec_heat = 1005  # J/K
+        self.air_spec_heat = 1005.  # J/K
         self.capacity_air = self.volume * self.air_spec_heat * self.air_density  # in J/K
         self.capacity_storage = therm_sto  # in J/K
         self.heat_max = heat_max  # in W
@@ -82,9 +89,20 @@ class ShoeBox:
         self.temperature_air += dT_air
         self.temperature_storage += dT_storage
 
+    def copy(self):
+        return ShoeBox(self.length1,
+                       self.length2,
+                       self.length3,
+                       self.heat_max,
+                       self.delta_temperature_max,
+                       self.capacity_storage,
+                       self.temp_init,
+                       self.convective_portion,
+                       self.u_value)
 
-@jit
-def model(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation):
+
+@jit(nopython=True)
+def model_kernel(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation):
     """
     this now has to compute the shoebox the whole day
     should return the history of the operative temperature
@@ -97,20 +115,37 @@ def model(shoebox, heating_strategy, temperature_outside_series, time_delta, sub
     temperature_air_series = np.empty(num_actuation_steps * substeps_per_actuation)
     temperature_storage_series = np.empty(num_actuation_steps * substeps_per_actuation)
 
+    result = np.empty((num_actuation_steps * substeps_per_actuation, 4))
+
     # loop over timesteps
     for i in range(num_actuation_steps):
         for j in range(substeps_per_actuation):
-            shoebox.timestep(heating_strategy[i], temperature_outside_series[i], time_delta=time_delta)
+            # shoebox.timestep(heating_strategy[i], temperature_outside_series[i], time_delta=time_delta)
+            shoebox.timestep(heating_strategy[i], temperature_outside_series[i], time_delta)
             # register operative temperature
-            temperature_operative_series[i * substeps_per_actuation + j] = shoebox.get_operative_temperature()
-            temperature_surface_series[i * substeps_per_actuation + j] = shoebox.get_surface_temperature()
-            temperature_air_series[i * substeps_per_actuation + j] = shoebox.temperature_air
-            temperature_storage_series[i * substeps_per_actuation + j] = shoebox.temperature_storage
+            result[i * substeps_per_actuation + j, 0] = shoebox.get_operative_temperature()
+            result[i * substeps_per_actuation + j, 1] = shoebox.get_surface_temperature()
+            result[i * substeps_per_actuation + j, 2] = shoebox.temperature_air
+            result[i * substeps_per_actuation + j, 3] = shoebox.temperature_storage
 
-    result_dict = {'temperature_operative_series': temperature_operative_series,
-                   'temperature_surface_series': temperature_surface_series,
-                   'temperature_air_series': temperature_air_series,
-                   'temperature_storage_series': temperature_storage_series}
+            # temperature_operative_series[i * substeps_per_actuation + j] = shoebox.get_operative_temperature()
+            # temperature_surface_series[i * substeps_per_actuation + j] = shoebox.get_surface_temperature()
+            # temperature_air_series[i * substeps_per_actuation + j] = shoebox.temperature_air
+            # temperature_storage_series[i * substeps_per_actuation + j] = shoebox.temperature_storage
+    return result
+
+
+
+def model(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation):
+    result = model_kernel(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation)
+    # result_dict = {'temperature_operative_series': temperature_operative_series,
+    #                'temperature_surface_series': temperature_surface_series,
+    #                'temperature_air_series': temperature_air_series,
+    #                'temperature_storage_series': temperature_storage_series}
+    result_dict = {'temperature_operative_series': result[:, 0],
+                   'temperature_surface_series': result[:, 1],
+                   'temperature_air_series': result[:, 2],
+                   'temperature_storage_series': result[:, 3]}
 
     return result_dict
 
@@ -174,7 +209,8 @@ def cost_function_demand_response(heating_strategy, power_weight_curve,
 def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, delta_time,
                  power_weight_curve, temperature_min, temperature_max, substeps_per_actuation,
                  comfort_penalty_weight=1.e5, control_penalty_weight=1.e6, return_full_dict=False):
-    shoebox_copy = copy.deepcopy(shoebox)
+    # shoebox_copy = copy.deepcopy(shoebox)
+    shoebox_copy = shoebox.copy()
     result_dict = model(shoebox_copy, heating_strategy, temperature_outside_series, delta_time, substeps_per_actuation)
     temperature_operative_series = result_dict['temperature_operative_series']
 
@@ -420,7 +456,6 @@ def main_script():
         # self, length1=lengths, length2=length[1], length3=lengths[2], heat_max=6000, delta_temperature_max=40, therm_sto=therm_sto, temp_init=20,
         # convective_portion=0.3, u_value=u_value, temperature_supply_delta_max=0.05
 
-
         # shoebox = ShoeBox(temp_init=20, length1=lengths[0], length2=lengths[1], length3=lengths[2], u_value=u_value, therm_sto=therm_sto)
         # shoebox = ShoeBox(length1=lengths[0], length2=lengths[1], length3=lengths[2], heat_max=6000, delta_temperature_max=40, therm_sto=therm_sto, temp_init=20,
         #     convective_portion=0.3, u_value=u_value, temperature_supply_delta_max=0.05)
@@ -429,9 +464,8 @@ def main_script():
 
         shoebox = ShoeBox(u_value=float64(u_value), therm_sto=therm_sto)
 
-
-
-        shoebox_init = copy.deepcopy(shoebox)
+        # shoebox_init = copy.deepcopy(shoebox)
+        shoebox_init = shoebox.copy()
 
         # def wrapped_func(x):
         #     return cost_wrapper(x, shoebox, temperature_outside_series, time_delta, power_weight_curve,
@@ -471,7 +505,8 @@ def main_script():
         # minimize_results = basinhopping(wrapped_func, heating_power_initial, niter=20)
         # actuation_sequence = minimize_results.x
 
-        shoebox_fresh = copy.deepcopy(shoebox_init)
+        # shoebox_fresh = copy.deepcopy(shoebox_init)
+        shoebox_fresh = shoebox_init.copy()
         postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
                                           temperature_outside=temperature_outside_series, time_delta=time_delta,
                                           power_weight_curve=power_weight_curve,
