@@ -45,8 +45,8 @@ class HeatDiffusionClass:
 
     def simulate(self, dt, steps):
         u_local = self.u_init.copy()
-        local_alpha = self.alpha # for some reason this makes it like 20-30% faster
-        local_dx = self.dx # for some reason this makes it like 20-30% faster
+        local_alpha = self.alpha  # for some reason this makes it like 20-30% faster
+        local_dx = self.dx  # for some reason this makes it like 20-30% faster
         for step in range(steps):
             u_new = u_local.copy()
             for i in range(1, len(u_local) - 1):
@@ -114,10 +114,15 @@ def heat_diffusion_class_script():
     print(f'{end - start:.4f}')
 
 
-
 def main():
+    print('heat diffusion class script')
     heat_diffusion_class_script()
+    print('heat diffusion class script')
     heat_diffusion_class_script()
+    print('')
+    print('heat diffusion script')
+    heat_diffusion_script()
+
 
 if __name__ == '__main__':
     main()

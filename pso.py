@@ -7,7 +7,6 @@ from multiprocessing import Pool
 
 
 
-
 def pso(cost_fn, dim, n_particles=30, n_iters=100,
         bounds=(0, 1), w=0.7, c1=1., c2=1., print_every=False, stepsize=1, randomness=0,
         visualize=False, checking_pos=False, seed=0, num_processes=1):
