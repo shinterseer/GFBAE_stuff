@@ -5,7 +5,7 @@ from multiprocessing import Pool
 
 
 def pso(cost_fn, dim, n_particles=30, n_iters=100,
-        bounds=(0, 1), w=0.7, c1=1., c2=1., print_every=False, stepsize=1, randomness=0,
+        bounds=(0, 1), w=0.7, c1=1., c2=1., print_every=None, stepsize=1, randomness=0,
         visualize=False, checking_pos=False, seed=0, num_processes=1):
     def pso_body(mapper):
         np.random.seed(seed)
@@ -18,7 +18,7 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
         pos = np.random.uniform(lb, ub, size=(n_particles, dim))
         vel = np.zeros((n_particles, dim))
         pbest = pos.copy()
-        pbest_val = np.array([cost_fn(p)['cost_total'] for p in pbest])
+        pbest_val = np.array([cost_fn(p) for p in pbest])
 
         gbest_idx = np.argmin(pbest_val)
         gbest = pbest[gbest_idx].copy()
@@ -50,7 +50,7 @@ def pso(cost_fn, dim, n_particles=30, n_iters=100,
             # vals = np.array([cost_fn(p)['cost_total'] for p in pos])
 
             list_of_pbest_val = mapper(cost_fn, pos)
-            vals = np.array([p['cost_total'] for p in list_of_pbest_val])
+            vals = np.array([p for p in list_of_pbest_val])
 
             # Update personal best
             better = vals < pbest_val

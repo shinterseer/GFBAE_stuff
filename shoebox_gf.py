@@ -412,147 +412,103 @@ def get_basic_parameters():
 
 
 def single_simulation_run(wrapped_func):
-    solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=500, print_every=50, bounds=(0, 3000),
+    solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=500, print_every=None, bounds=(0, 3000),
                        stepsize=500, c1=1, c2=1, randomness=.3, visualize=False, num_processes=1)
     actuation_sequence = solution[0]
     return actuation_sequence
 
 
-def main_script():
+def main_script(outfile_name, plotting=True):
     # Model parameters
     basic_parameter_dict = get_basic_parameters()
     temperature_outside_series = basic_parameter_dict["temperature_outside_series"]
     time_delta = basic_parameter_dict["time_delta"]
     power_weight_curve = basic_parameter_dict["power_weight_curve"]
-    heating_power_initial = basic_parameter_dict["heating_power_initial"]
-    bounds = basic_parameter_dict["bounds"]
+    # heating_power_initial = basic_parameter_dict["heating_power_initial"]
+    # bounds = basic_parameter_dict["bounds"]
     temperature_min = basic_parameter_dict["temperature_min"]
     temperature_max = basic_parameter_dict["temperature_max"]
     substeps_per_actuation = basic_parameter_dict["substeps_per_actuation"]
     lengths = basic_parameter_dict["lengths"]
 
     # Optimize control actions
-    print("u-value, thermal capacity, comfort penalty weight, peak alignment factor, total energy turnover, grid burden, cost power, cost comfort, cost_control, computation time in s")
-    # print("thermal capacity, peak alignment factor, total energy turnover, grid burden, computation time in s")
-    df_results = pd.DataFrame(columns=["u-value", "thermal capacity", "comfort penaltyweight",
-                                       "peak alignment factor", "total energy turnover", "grid burden", "cost power", "cost comfort", 'cost_control',
-                                       "computation time"])
+    # print("insulation_thickness, storage_thickness, comfort penalty weight, peak alignment factor, total energy turnover, grid burden, cost power, cost comfort, cost_control, computation time in s")
+    storage_thickness_list = 0.01 * np.array(list(range(1, 11)))  # 0.01, 0.02, ..., 0.1
+    insulation_thickness_list = 0.03 * np.array(list(range(1, 11)))  # 0.03, 0.06, ..., 0.3
 
-    # df_results = pd.DataFrame(columns=["thermal capacity", "peak alignment factor", "total energy turnover", "grid burden", "computation time"])
-    # u_values = [0.1, .15, 0.2, .25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0]
-    # thermal_capacities = 1.e6 * np.array([1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.])
-    thermal_capacities = 1.e6 * np.array([8.])
-    # thermal_capacities = 1.e6 * np.array([1., 2.])
-    # u_values = [0.3]
-
-    # comfort_penalty_weights = [1.e5, 1.e6, 1.e7, 1.e8, 1.e9, 1.e10]
     comfort_penalty_weight = 1.e7
     control_penalty_weight = 1.e6
-    # therm_sto = 3.6e6
-    u_value = .3
-    # filename_suffix = f"u{u_value}_tc{therm_sto:.1e}_cpwV"
-    # filename_suffix = f"uV_tc{therm_sto:.1e}_cpw{comfort_penalty_weight:.1e}"
-    filename_suffix = f"u{u_value}_tcV_cpw{comfort_penalty_weight:.1e}"
-    # df_actuation_results = pd.DataFrame(columns=comfort_penalty_weights)
-    # df_actuation_results = pd.DataFrame(columns=u_values)
-    df_actuation_results = pd.DataFrame(columns=thermal_capacities)
 
     # shoebox_init = copy.deepcopy(shoebox)
-    num_processes = 8
-    results_dict = dict()
-    results_picklefile = '20250804_results.pkl'
+    results_list = list()
     plotting = False
 
-    for i in range(len(thermal_capacities)):
-        start_time = time.time()
-        therm_sto = thermal_capacities[i]
-        insulation_thickness = 0.1
-        shoebox = ShoeBox(insulation_thickness=float64(insulation_thickness), storage_thickness=float64(0.01))
-        shoebox_init = shoebox.copy()  # for later - because simulating shoebox will change temperatures
-        wrapped_func = partial(cost_wrapper, shoebox=shoebox, temperature_outside_series=temperature_outside_series,
-                               delta_time=time_delta, power_weight_curve=power_weight_curve,
-                               temperature_min=temperature_min, temperature_max=temperature_max,
-                               substeps_per_actuation=substeps_per_actuation, comfort_penalty_weight=comfort_penalty_weight,
-                               control_penalty_weight=control_penalty_weight, return_full_dict=True)
+    num_runs = len(storage_thickness_list) * len(insulation_thickness_list)
+    for i in range(len(storage_thickness_list)):
+        storage_thickness = storage_thickness_list[i]
+        for j in range(len(insulation_thickness_list)):
+            print(f'run number: {i * len(storage_thickness_list) + j + 1} of {num_runs}')
+            insulation_thickness = insulation_thickness_list[j]
+            start_time = time.time()
+            shoebox_parameters = {'length1': 5., 'length2': 5., 'length3': 5., 'heat_max': 6000., 'storage_thickness': storage_thickness,
+                                  'temp_init': 20., 'convective_portion': 0.3, 'insulation_thickness': insulation_thickness}
+            shoebox = ShoeBox(**shoebox_parameters)
 
-        actuation_sequence = single_simulation_run(wrapped_func)
-        results_dict[(insulation_thickness, therm_sto)] = actuation_sequence
+            # shoebox = ShoeBox(insulation_thickness=float64(insulation_thickness), storage_thickness=float64(0.01))
+            shoebox_init = shoebox.copy()  # for later - because simulating shoebox will change temperatures
+            wrapped_func = partial(cost_wrapper, shoebox=shoebox, temperature_outside_series=temperature_outside_series,
+                                   delta_time=time_delta, power_weight_curve=power_weight_curve,
+                                   temperature_min=temperature_min, temperature_max=temperature_max,
+                                   substeps_per_actuation=substeps_per_actuation, comfort_penalty_weight=comfort_penalty_weight,
+                                   control_penalty_weight=control_penalty_weight, return_full_dict=False)
 
-        # print('checking cost from main with wrapped_func - cost_wrapper')
-        # pso.check_cost(actuation_sequence, wrapped_func)
+            actuation_sequence = single_simulation_run(wrapped_func)
 
-        # minimize_results = minimize(cost_wrapper, heating_power_initial,
-        #
-        #                             # method='BFGS',
-        #                             # options={
-        #                             #     'gtol': 1e-10,
-        #                             #     'eps': 1e-8,
-        #                             #     'maxiter': 10000,
-        #                             #     'disp': True
-        #                             # },
-        #
-        #                             args=(shoebox, temperature_outside_series, time_delta, power_weight_curve,
-        #                                   temperature_min, temperature_max, substeps_per_actuation, comfort_penalty_weight),
-        #                             bounds=bounds)
+            shoebox_fresh = shoebox_init.copy()
+            postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
+                                              temperature_outside=temperature_outside_series, time_delta=time_delta,
+                                              power_weight_curve=power_weight_curve,
+                                              temperature_min=temperature_min, temperature_max=temperature_max,
+                                              substeps_per_actuation=substeps_per_actuation,
+                                              comfort_penalty_weight=comfort_penalty_weight)
+            computation_time = time.time() - start_time
 
-        # minimize_results = basinhopping(wrapped_func, heating_power_initial, niter=20)
-        # actuation_sequence = minimize_results.x
+            # print(f"{insulation_thickness}, {storage_thickness}, {comfort_penalty_weight:.1e}, "
+            #       f"{postproc_dict['peak_alignment_factor']:.4f}, "
+            #       f"{postproc_dict['total_energy_turnover']:.3e}, "
+            #       f"{postproc_dict['grid_burden']:.3e}, "
+            #       f"{postproc_dict['cost_power'].sum():.3e}, "
+            #       f"{postproc_dict['cost_comfort'].sum():.3e}, "
+            #       f"{postproc_dict['cost_control'].sum():.3e}, "
+            #       f"{computation_time:.3f}")
 
-        # shoebox_fresh = copy.deepcopy(shoebox_init)
-        shoebox_fresh = shoebox_init.copy()
-        postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
-                                          temperature_outside=temperature_outside_series, time_delta=time_delta,
-                                          power_weight_curve=power_weight_curve,
-                                          temperature_min=temperature_min, temperature_max=temperature_max,
-                                          substeps_per_actuation=substeps_per_actuation,
-                                          comfort_penalty_weight=comfort_penalty_weight)
-        computation_time = time.time() - start_time
+            results_list.append({'postproc_dict': postproc_dict,
+                                 'actuation_sequence': actuation_sequence,
+                                 'shoebox_parameters': shoebox_parameters})
 
-        # df_results = pd.DataFrame(columns=["u-value", "thermal capacity", "comfort penaltyweight",
-        #                                    "peak alignment factor", "total energy turnover", "grid burden",
-        #                                    "computation time"])
-
-        df_results.loc[i] = [u_value, therm_sto, comfort_penalty_weight,
-                             postproc_dict['peak_alignment_factor'],
-                             postproc_dict['total_energy_turnover'],
-                             postproc_dict['grid_burden'],
-                             postproc_dict['cost_power'].sum(),
-                             postproc_dict['cost_comfort'].sum(),
-                             postproc_dict['cost_control'].sum(),
-                             computation_time]
-
-        df_actuation_results.iloc[:, i] = actuation_sequence
-
-        print(f"{u_value}, {therm_sto}, {comfort_penalty_weight:.1e}, "
-              f"{postproc_dict['peak_alignment_factor']:.4f}, "
-              f"{postproc_dict['total_energy_turnover']:.3e}, "
-              f"{postproc_dict['grid_burden']:.3e}, "
-              f"{postproc_dict['cost_power'].sum():.3e}, "
-              f"{postproc_dict['cost_comfort'].sum():.3e}, "
-              f"{postproc_dict['cost_control'].sum():.3e}, "
-              f"{computation_time:.3f}")
-
-    df_results.to_csv('shoebox_results.csv')
-    df_actuation_results.to_csv(f"actuation_results_{filename_suffix}.csv")
-    post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
+    with open(outfile_name, 'wb') as f:
+        pickle.dump(results_list, f)
+    if plotting:
+        post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
 
 
 def plot_grid_stress_index(shoebox, filename="20250508_actuation_results_u0.3_tc3.6e+06_cpwV.csv", x_label=None):
     df = pd.read_csv(filename, index_col=0)
-    temperature_outside_series = get_basic_parameters()["temperature_outside_series"]
-    time_delta = get_basic_parameters()["time_delta"]
-    power_weight_curve = get_basic_parameters()["power_weight_curve"]
-    temperature_min = get_basic_parameters()["temperature_min"]
-    temperature_max = get_basic_parameters()["temperature_max"]
-    substeps_per_actuation = get_basic_parameters()["substeps_per_actuation"]
-    lengths = get_basic_parameters()["lengths"]
+    parameter_dict = get_basic_parameters()
+    temperature_outside_series = parameter_dict["temperature_outside_series"]
+    time_delta = parameter_dict["time_delta"]
+    power_weight_curve = parameter_dict["power_weight_curve"]
+    temperature_min = parameter_dict["temperature_min"]
+    temperature_max = parameter_dict["temperature_max"]
+    substeps_per_actuation = parameter_dict["substeps_per_actuation"]
+    lengths = parameter_dict["lengths"]
 
     # if plot_peak_alignment:
     x_vals = list()
     y_vals = list()
     for col in df.columns:
         x_vals.append(float(col))
-        shoebox_fresh = copy.deepcopy(shoebox)
+        shoebox_fresh = shoebox.copy()
         actuation_sequence = df[col].array
         postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
                                           temperature_outside=temperature_outside_series, time_delta=time_delta,
@@ -568,22 +524,37 @@ def plot_grid_stress_index(shoebox, filename="20250508_actuation_results_u0.3_tc
     plt.show(block=True)
 
 
-def pp_from_file(filename, column_index, shoebox, comfort_penalty_weight):
-    df = pd.read_csv(filename, index_col=0)
-    temperature_outside_series = get_basic_parameters()["temperature_outside_series"]
-    time_delta = get_basic_parameters()["time_delta"]
-    power_weight_curve = get_basic_parameters()["power_weight_curve"]
-    temperature_min = get_basic_parameters()["temperature_min"]
-    temperature_max = get_basic_parameters()["temperature_max"]
-    substeps_per_actuation = get_basic_parameters()["substeps_per_actuation"]
-    # lengths = get_basic_parameters()["lengths"]
-    actuation_sequence = df.iloc[:, column_index].array
-    postproc_dict = get_postproc_info(shoebox=shoebox, actuation_sequence=actuation_sequence,
-                                      temperature_outside=temperature_outside_series, time_delta=time_delta,
-                                      power_weight_curve=power_weight_curve,
-                                      temperature_min=temperature_min, temperature_max=temperature_max,
-                                      substeps_per_actuation=substeps_per_actuation, comfort_penalty_weight=comfort_penalty_weight)
-    post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
+def pp_from_file(filename, comfort_penalty_weight=1.e7):
+    with open(filename, 'rb') as f:
+        data = pickle.load(f)
+
+    df = pd.DataFrame([s['shoebox_parameters'] for s in data])
+    df['grid_load_index'] = [s['postproc_dict']['peak_alignment_factor'] for s in data]
+
+
+    # Pivot to 2D grid format
+    pivot = df.pivot(index='storage_thickness', columns='insulation_thickness', values='grid_load_index')
+
+    # Create meshgrid from index and columns
+    x = pivot.columns.values
+    y = pivot.index.values
+    x, y = np.meshgrid(x, y)
+
+    # Extract z values
+    z = pivot.values
+
+    # Plot
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot_surface(x, y, z, cmap='viridis')
+
+    # ax.set_title('grid_load_index')
+    ax.set_xlabel('insulation_thickness')
+    ax.set_ylabel('storage_thickness')
+    ax.set_zlabel('grid_load_index')
+
+    plt.show(block=True)
+
 
 
 def quickplot(myarray):
@@ -593,4 +564,6 @@ def quickplot(myarray):
 
 
 if __name__ == "__main__":
-    main_script()
+    # main_script(outfile_name='20250805_results.pkl', plotting=True)
+    pp_from_file('20250805_results.pkl')
+
