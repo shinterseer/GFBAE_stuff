@@ -30,9 +30,9 @@ spec = [
     ('air_density', float64),
     ('air_spec_heat', float64),
     ('capacity_air', float64),
+    ('storage_thickness', float64),
     ('capacity_storage', float64),
     ('heat_max', float64),
-    ('delta_temperature_max', float64),
     ('temperature_storage', float64),
     ('temperature_air', float64),
     ('convective_portion', float64),
@@ -44,8 +44,8 @@ spec = [
 
 @jitclass(spec)
 class ShoeBox:
-    def __init__(self, length1=5., length2=5., length3=5., heat_max=6000., delta_temperature_max=40., therm_sto=3.6e6, temp_init=20.,
-                 # convective_portion=0.3, u_value=0.3):
+    # def __init__(self, length1=5., length2=5., length3=5., heat_max=6000., therm_sto=3.6e6, temp_init=20.,
+    def __init__(self, length1=5., length2=5., length3=5., heat_max=6000., storage_thickness=.03, temp_init=20.,
                  convective_portion=0.3, insulation_thickness=0.1):
         self.temp_init = temp_init
         self.length1 = length1
@@ -57,11 +57,15 @@ class ShoeBox:
         self.area_ceiling = length1 * length2
         self.area_hull = 2 * length1 * length3 + 2 * length2 * length3
         self.air_density = 1.2041  # kg/m3
-        self.air_spec_heat = 1005.  # J/K
+        self.air_spec_heat = 1005.  # J/kgK
         self.capacity_air = self.volume * self.air_spec_heat * self.air_density  # in J/K
-        self.capacity_storage = therm_sto  # in J/K
+        self.storage_thickness = storage_thickness
+        # self.capacity_storage = therm_sto  # in J/K
+
+        # reinforced concrete cap = 1000 J/kgK. density = 2500 kg/m3
+        self.capacity_storage = self.storage_thickness * (self.area_hull + self.area_ceiling) * 2500. * 1000.  # in J/K
         self.heat_max = heat_max  # in W
-        self.delta_temperature_max = delta_temperature_max
+        # self.delta_temperature_max = delta_temperature_max
         self.temperature_storage = temp_init
         self.temperature_air = temp_init
         self.convective_portion = convective_portion
@@ -70,28 +74,31 @@ class ShoeBox:
         self.u_value = 0.04 / self.insulation_thickness
         self.thermal_transmittance = self.u_value * (self.area_hull + self.area_floor + self.area_ceiling)
 
-    def get_surface_temperature(self):
-        return ((self.area_hull + self.area_ceiling) * self.temperature_storage + self.area_floor * self.temperature_supply) / (self.area_hull + self.area_floor + self.area_ceiling)
+    # def get_surface_temperature(self):
+    #     return ((self.area_hull + self.area_ceiling) * self.temperature_storage + self.area_floor * self.temperature_supply) / (self.area_hull + self.area_floor + self.area_ceiling)
+    #
+    # def get_operative_temperature(self):
+    #     return 0.5 * (self.temperature_air + self.get_surface_temperature())
+    #     # temp_surf = ((self.area_hull + self.area_ceiling) * self.temperature_storage + self.area_floor * self.temperature_supply) / (self.area_hull + self.area_floor + self.area_ceiling)
+    #     # return 0.5 * (self.temperature_air + temp_surf)
 
-    def get_operative_temperature(self):
-        return 0.5 * (self.temperature_air + self.get_surface_temperature())
-        # temp_surf = ((self.area_hull + self.area_ceiling) * self.temperature_storage + self.area_floor * self.temperature_supply) / (self.area_hull + self.area_floor + self.area_ceiling)
-        # return 0.5 * (self.temperature_air + temp_surf)
-
-    def timestep(self, heating_power, temperature_outside, time_delta=120):
-        heating_power = min(self.heat_max, heating_power)
-        heating_power = max(0, heating_power)
-
-        # change temperatures
-        heating_to_storage = heating_power * (1 - self.convective_portion)
-        heating_to_air = heating_power * self.convective_portion
-        storage_to_outside = self.thermal_transmittance * (self.temperature_air - temperature_outside)
-        Rsi = 0.13  # in m2K/W
-        air_to_storage = (self.temperature_air - self.temperature_storage) * (self.area_hull + self.area_ceiling) / Rsi
-        dT_air = (heating_to_air - air_to_storage) / self.capacity_air * time_delta
-        dT_storage = (heating_to_storage + air_to_storage - storage_to_outside) / self.capacity_storage * time_delta
-        self.temperature_air += dT_air
-        self.temperature_storage += dT_storage
+    # def timestep(self, heating_power, temperature_outside, time_delta=120):
+    #     '''
+    #     timestep is not being called anymore - it has all been moved to self.simulation
+    #     '''
+    #     heating_power = min(self.heat_max, heating_power)
+    #     heating_power = max(0, heating_power)
+    #
+    #     # change temperatures
+    #     heating_to_storage = heating_power * (1 - self.convective_portion)
+    #     heating_to_air = heating_power * self.convective_portion
+    #     storage_to_outside = self.thermal_transmittance * (self.temperature_air - temperature_outside)
+    #     Rsi = 0.13  # in m2K/W
+    #     air_to_storage = (self.temperature_air - self.temperature_storage) * (self.area_hull + self.area_ceiling) / Rsi
+    #     dT_air = (heating_to_air - air_to_storage) / self.capacity_air * time_delta
+    #     dT_storage = (heating_to_storage + air_to_storage - storage_to_outside) / self.capacity_storage * time_delta
+    #     self.temperature_air += dT_air
+    #     self.temperature_storage += dT_storage
 
     def simulation(self, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation):
         '''
@@ -145,6 +152,7 @@ class ShoeBox:
                 result[global_index, 1] = surface_temperature
                 result[global_index, 2] = temperature_air_local
                 result[global_index, 3] = temperature_storage_local
+
         self.temperature_air = temperature_air_local
         self.temperature_storage = temperature_storage_local
 
@@ -158,103 +166,17 @@ class ShoeBox:
                        self.length2,
                        self.length3,
                        self.heat_max,
-                       self.delta_temperature_max,
-                       self.capacity_storage,
+                       self.storage_thickness,
                        self.temp_init,
                        self.convective_portion,
                        self.insulation_thickness)
 
 
-@njit
-def simulation(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation):
-    # init temperature_operative_series
-    num_actuation_steps = heating_strategy.size
-    result = np.empty((num_actuation_steps * substeps_per_actuation, 4))
-
-    heat_max_local = shoebox.heat_max
-    convective_portion_local = shoebox.convective_portion
-    thermal_transmittance_local = shoebox.thermal_transmittance
-    temperature_air_local = shoebox.temperature_air
-    temperature_storage_local = shoebox.temperature_storage
-    area_hull_local = shoebox.area_hull
-    area_ceiling_local = shoebox.area_ceiling
-    capacity_air_local = shoebox.capacity_air
-    capacity_storage_local = shoebox.capacity_storage
-    temperature_supply_local = shoebox.temperature_supply
-    area_floor_local = shoebox.area_floor
-
-    # loop over timesteps
-    for i in range(num_actuation_steps):
-        heating_power = heating_strategy[i]
-        for j in range(substeps_per_actuation):
-            global_index = i * substeps_per_actuation + j
-
-            heating_power = min(heat_max_local, heating_power)
-            heating_power = max(0., heating_power)
-
-            # change temperatures
-            heating_to_storage = heating_power * (1. - convective_portion_local)
-            heating_to_air = heating_power * convective_portion_local
-            storage_to_outside = thermal_transmittance_local * (temperature_air_local - temperature_outside_series[global_index])
-            Rsi = 0.13  # in m2K/W
-            air_to_storage = (temperature_air_local - temperature_storage_local) * (area_hull_local + area_ceiling_local) / Rsi
-            dT_air = (heating_to_air - air_to_storage) / capacity_air_local * time_delta
-            dT_storage = (heating_to_storage + air_to_storage - storage_to_outside) / capacity_storage_local * time_delta
-            temperature_air_local += dT_air
-            temperature_storage_local += dT_storage
-
-            surface_temperature = ((area_hull_local + area_ceiling_local) * temperature_storage_local + area_floor_local * temperature_supply_local) / (
-                    area_hull_local + area_floor_local + area_ceiling_local)
-            operative_temperature = 0.5 * (temperature_air_local + surface_temperature)
-
-            # register operative temperature
-            result[global_index, 0] = operative_temperature
-            result[global_index, 1] = surface_temperature
-            result[global_index, 2] = temperature_air_local
-            result[global_index, 3] = temperature_storage_local
-    shoebox.temperature_air = temperature_air_local
-    shoebox.temperature_storage = temperature_storage_local
-
-    return result
-
-
-@njit
-def model_kernel(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation):
-    """
-    this now has to compute the shoebox the whole day
-    should return the history of the operative temperature
-    compiling with numba did not show additional speedup (to the speedup you get from compiling the shoebox class)
-    """
-    # init temperature_operative_series
-    num_actuation_steps = heating_strategy.size
-    result = np.empty((num_actuation_steps * substeps_per_actuation, 4))
-    # temperature_operative_series = np.empty(num_actuation_steps * substeps_per_actuation)
-    # temperature_surface_series = np.empty(num_actuation_steps * substeps_per_actuation)
-    # temperature_air_series = np.empty(num_actuation_steps * substeps_per_actuation)
-    # temperature_storage_series = np.empty(num_actuation_steps * substeps_per_actuation)
-
-    # loop over timesteps
-    for i in range(num_actuation_steps):
-        for j in range(substeps_per_actuation):
-            # shoebox.timestep(heating_strategy[i], temperature_outside_series[i], time_delta=time_delta)
-            shoebox.timestep(heating_strategy[i], temperature_outside_series[i], time_delta)
-            # register operative temperature
-            result[i * substeps_per_actuation + j, 0] = shoebox.get_operative_temperature()
-            result[i * substeps_per_actuation + j, 1] = shoebox.get_surface_temperature()
-            result[i * substeps_per_actuation + j, 2] = shoebox.temperature_air
-            result[i * substeps_per_actuation + j, 3] = shoebox.temperature_storage
-
-            # temperature_operative_series[i * substeps_per_actuation + j] = shoebox.get_operative_temperature()
-            # temperature_surface_series[i * substeps_per_actuation + j] = shoebox.get_surface_temperature()
-            # temperature_air_series[i * substeps_per_actuation + j] = shoebox.temperature_air
-            # temperature_storage_series[i * substeps_per_actuation + j] = shoebox.temperature_storage
-    return result
-
-
 def model(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation):
     # result = model_kernel(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation)
-    # result = shoebox.simulation(heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation)
-    result = simulation(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation)
+    result = shoebox.simulation(heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation)
+    # result = simulation(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation)
+
     # result_dict = {'temperature_operative_series': temperature_operative_series,
     #                'temperature_surface_series': temperature_surface_series,
     #                'temperature_air_series': temperature_air_series,
@@ -490,8 +412,8 @@ def get_basic_parameters():
 
 
 def single_simulation_run(wrapped_func):
-    solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=1000, print_every=50, bounds=(0, 3000),
-                       stepsize=500, c1=1, c2=1, randomness=.5, visualize=False, num_processes=1)
+    solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=500, print_every=50, bounds=(0, 3000),
+                       stepsize=500, c1=1, c2=1, randomness=.3, visualize=False, num_processes=1)
     actuation_sequence = solution[0]
     return actuation_sequence
 
@@ -545,8 +467,8 @@ def main_script():
         start_time = time.time()
         therm_sto = thermal_capacities[i]
         insulation_thickness = 0.1
-        shoebox = ShoeBox(insulation_thickness=float64(insulation_thickness), therm_sto=float64(therm_sto))
-        shoebox_init = shoebox.copy() # for later - because simulating shoebox will change temperatures
+        shoebox = ShoeBox(insulation_thickness=float64(insulation_thickness), storage_thickness=float64(0.01))
+        shoebox_init = shoebox.copy()  # for later - because simulating shoebox will change temperatures
         wrapped_func = partial(cost_wrapper, shoebox=shoebox, temperature_outside_series=temperature_outside_series,
                                delta_time=time_delta, power_weight_curve=power_weight_curve,
                                temperature_min=temperature_min, temperature_max=temperature_max,
@@ -662,6 +584,12 @@ def pp_from_file(filename, column_index, shoebox, comfort_penalty_weight):
                                       temperature_min=temperature_min, temperature_max=temperature_max,
                                       substeps_per_actuation=substeps_per_actuation, comfort_penalty_weight=comfort_penalty_weight)
     post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
+
+
+def quickplot(myarray):
+    plt.plot(myarray)
+    plt.grid()
+    plt.show(block=True)
 
 
 if __name__ == "__main__":
