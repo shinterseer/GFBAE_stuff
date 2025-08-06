@@ -279,10 +279,9 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
 def get_postproc_info(shoebox, actuation_sequence, temperature_outside, time_delta, power_weight_curve,
                       temperature_max, temperature_min, substeps_per_actuation, comfort_penalty_weight=1.e5):
     # actuation_sequence = np.repeat(actuation_sequence, substeps_per_actuation)
-    dim = len(actuation_sequence)
-    total_energy_turnover = time_delta * np.sum(np.abs(actuation_sequence))
+    total_energy_turnover = time_delta * np.sum(np.abs(np.repeat(actuation_sequence, substeps_per_actuation)))
     grid_burden = time_delta * np.dot(np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve)
-    peak_alignment_factor = grid_burden / total_energy_turnover
+    grid_stress_index = grid_burden / total_energy_turnover
 
     result_dict = model(shoebox, heating_strategy=actuation_sequence, temperature_outside_series=temperature_outside,
                         time_delta=time_delta, substeps_per_actuation=substeps_per_actuation)
@@ -300,7 +299,7 @@ def get_postproc_info(shoebox, actuation_sequence, temperature_outside, time_del
             "cost_control": cost_dict['cost_control'],
             "total_energy_turnover": total_energy_turnover,
             "grid_burden": grid_burden,
-            "peak_alignment_factor": peak_alignment_factor}
+            "grid_stress_index": grid_stress_index}
 
 
 def array_to_time_series(array, step_in_minutes=1, start_time="2025-04-29 00:00"):
@@ -411,9 +410,9 @@ def get_basic_parameters():
             "power_weight_curve": power_weight_curve}
 
 
-def single_simulation_run(wrapped_func):
-    solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=500, print_every=None, bounds=(0, 3000),
-                       stepsize=500, c1=1, c2=1, randomness=.3, visualize=False, num_processes=1)
+def single_simulation_run(wrapped_func, n_particles=30, n_iters=1000, stepsize=500, randomness=.3):
+    solution = pso.pso(wrapped_func, dim=24, n_particles=n_particles, n_iters=n_iters, print_every=None, bounds=(0, 3000),
+                       stepsize=stepsize, c1=1, c2=1, randomness=randomness, visualize=False, num_processes=1)
     actuation_sequence = solution[0]
     return actuation_sequence
 
@@ -453,9 +452,6 @@ def main_script(outfile_name, plotting=True):
             shoebox_parameters = {'length1': 5., 'length2': 5., 'length3': 5., 'heat_max': 6000., 'storage_thickness': storage_thickness,
                                   'temp_init': 20., 'convective_portion': 0.3, 'insulation_thickness': insulation_thickness}
             shoebox = ShoeBox(**shoebox_parameters)
-
-            # shoebox = ShoeBox(insulation_thickness=float64(insulation_thickness), storage_thickness=float64(0.01))
-            shoebox_init = shoebox.copy()  # for later - because simulating shoebox will change temperatures
             wrapped_func = partial(cost_wrapper, shoebox=shoebox, temperature_outside_series=temperature_outside_series,
                                    delta_time=time_delta, power_weight_curve=power_weight_curve,
                                    temperature_min=temperature_min, temperature_max=temperature_max,
@@ -464,7 +460,7 @@ def main_script(outfile_name, plotting=True):
 
             actuation_sequence = single_simulation_run(wrapped_func)
 
-            shoebox_fresh = shoebox_init.copy()
+            shoebox_fresh = ShoeBox(**shoebox_parameters)
             postproc_dict = get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
                                               temperature_outside=temperature_outside_series, time_delta=time_delta,
                                               power_weight_curve=power_weight_curve,
@@ -473,21 +469,13 @@ def main_script(outfile_name, plotting=True):
                                               comfort_penalty_weight=comfort_penalty_weight)
             computation_time = time.time() - start_time
 
-            # print(f"{insulation_thickness}, {storage_thickness}, {comfort_penalty_weight:.1e}, "
-            #       f"{postproc_dict['peak_alignment_factor']:.4f}, "
-            #       f"{postproc_dict['total_energy_turnover']:.3e}, "
-            #       f"{postproc_dict['grid_burden']:.3e}, "
-            #       f"{postproc_dict['cost_power'].sum():.3e}, "
-            #       f"{postproc_dict['cost_comfort'].sum():.3e}, "
-            #       f"{postproc_dict['cost_control'].sum():.3e}, "
-            #       f"{computation_time:.3f}")
-
             results_list.append({'postproc_dict': postproc_dict,
                                  'actuation_sequence': actuation_sequence,
                                  'shoebox_parameters': shoebox_parameters})
 
-    with open(outfile_name, 'wb') as f:
-        pickle.dump(results_list, f)
+    if outfile_name is not None:
+        with open(outfile_name, 'wb') as f:
+            pickle.dump(results_list, f)
     if plotting:
         post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
 
@@ -515,7 +503,7 @@ def plot_grid_stress_index(shoebox, filename="20250508_actuation_results_u0.3_tc
                                           power_weight_curve=power_weight_curve,
                                           temperature_min=temperature_min, temperature_max=temperature_max,
                                           substeps_per_actuation=substeps_per_actuation)
-        y_vals.append(postproc_dict["peak_alignment_factor"])
+        y_vals.append(postproc_dict["grid_stress_index"])
     plt.plot(x_vals, y_vals)
     plt.xlabel(x_label)
     plt.ylabel("grid stress index")
@@ -524,37 +512,75 @@ def plot_grid_stress_index(shoebox, filename="20250508_actuation_results_u0.3_tc
     plt.show(block=True)
 
 
-def pp_from_file(filename, comfort_penalty_weight=1.e7):
+def debugging_stuff(df, data, insulations, storages):
+    pwc = get_basic_parameters()['power_weight_curve']
+    x=0
+    # find the runs
+    run1 = dict()
+    run2 = dict()
+    for run in data:
+        if (run['shoebox_parameters']['insulation_thickness'] == insulations[0] and
+                run['shoebox_parameters']['storage_thickness'] == storages[0]):
+            run1 = run
+        if (run['shoebox_parameters']['insulation_thickness'] == insulations[1] and
+                run['shoebox_parameters']['storage_thickness'] == storages[1]):
+            run2 = run
+    x=0
+
+
+def pp_from_file(filename):
     with open(filename, 'rb') as f:
         data = pickle.load(f)
 
     df = pd.DataFrame([s['shoebox_parameters'] for s in data])
-    df['grid_load_index'] = [s['postproc_dict']['peak_alignment_factor'] for s in data]
-
+    df['grid_load_index'] = [s['postproc_dict']['grid_stress_index'] for s in data]
 
     # Pivot to 2D grid format
     pivot = df.pivot(index='storage_thickness', columns='insulation_thickness', values='grid_load_index')
 
+    debugging_stuff(df, data, insulations=[.18, .18], storages=[.04, .08])
+
     # Create meshgrid from index and columns
-    x = pivot.columns.values
-    y = pivot.index.values
-    x, y = np.meshgrid(x, y)
+    x_vals = pivot.columns.values
+    y_vals = pivot.index.values
+    x_grid, y_grid = np.meshgrid(x_vals, y_vals)
 
     # Extract z values
-    z = pivot.values
+    z_vals = pivot.values
 
-    # Plot
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.plot_surface(x, y, z, cmap='viridis')
+    # Find middle indices
+    mid_x_idx = len(x_vals) // 2
+    mid_y_idx = len(y_vals) // 2
 
-    # ax.set_title('grid_load_index')
-    ax.set_xlabel('insulation_thickness')
-    ax.set_ylabel('storage_thickness')
-    ax.set_zlabel('grid_load_index')
+    # Create figure with 3 subplots
+    fig = plt.figure(figsize=(15, 5))
 
+    # --- Plot 1: 3D Surface ---
+    ax1 = fig.add_subplot(131, projection='3d')
+    ax1.plot_surface(x_grid, y_grid, z_vals, cmap='viridis')
+    ax1.set_title("3D Surface")
+    ax1.set_xlabel("x")
+    ax1.set_ylabel("y")
+    ax1.set_zlabel("z")
+
+    # --- Plot 2: Cross-section at middle x (fixed x, vary y) ---
+    ax2 = fig.add_subplot(132)
+    ax2.plot(y_vals, z_vals[:, mid_x_idx])
+    ax2.set_title(f"Cross-section at x = {x_vals[mid_x_idx]:.2f}")
+    ax2.set_xlabel("y")
+    ax2.set_ylabel("z")
+    ax2.grid(True)
+
+    # --- Plot 3: Cross-section at middle y (fixed y, vary x) ---
+    ax3 = fig.add_subplot(133)
+    ax3.plot(x_vals, z_vals[mid_y_idx, :])
+    ax3.set_title(f"Cross-section at y = {y_vals[mid_y_idx]:.2f}")
+    ax3.set_xlabel("x")
+    ax3.set_ylabel("z")
+    ax3.grid(True)
+
+    plt.tight_layout()
     plt.show(block=True)
-
 
 
 def quickplot(myarray):
@@ -564,6 +590,6 @@ def quickplot(myarray):
 
 
 if __name__ == "__main__":
-    # main_script(outfile_name='20250805_results.pkl', plotting=True)
-    pp_from_file('20250805_results.pkl')
-
+    fn_global = '20250806_results.pkl'
+    # main_script(outfile_name=None, plotting=True)
+    pp_from_file(fn_global)
