@@ -146,7 +146,7 @@ class ShoeBox:
                         area_hull_local + area_floor_local + area_ceiling_local)
                 operative_temperature = 0.5 * (temperature_air_local + surface_temperature)
 
-                # register operative temperature
+                # register results
                 result[global_index, 0] = operative_temperature
                 result[global_index, 1] = surface_temperature
                 result[global_index, 2] = temperature_air_local
@@ -159,7 +159,7 @@ class ShoeBox:
 
     def copy(self):
         '''
-        needed this, because the jit compiled shoebox is not pickelable
+        needed this, because the jit compiled shoebox is not pickelable => cannot use deepcopy
         '''
         return ShoeBox(self.length1,
                        self.length2,
@@ -176,10 +176,6 @@ def model(shoebox, heating_strategy, temperature_outside_series, time_delta, sub
     result = shoebox.simulation(heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation)
     # result = simulation(shoebox, heating_strategy, temperature_outside_series, time_delta, substeps_per_actuation)
 
-    # result_dict = {'temperature_operative_series': temperature_operative_series,
-    #                'temperature_surface_series': temperature_surface_series,
-    #                'temperature_air_series': temperature_air_series,
-    #                'temperature_storage_series': temperature_storage_series}
     result_dict = {'temperature_operative_series': result[:, 0],
                    'temperature_surface_series': result[:, 1],
                    'temperature_air_series': result[:, 2],
@@ -453,5 +449,5 @@ def main_script(outfile_name, plotting=True):
 
 if __name__ == "__main__":
     fn_global = '20250806_results20.pkl'
-    main_script(outfile_name=fn_global, plotting=False)
+    # main_script(outfile_name=fn_global, plotting=False)
     pp.pp_from_file(fn_global)

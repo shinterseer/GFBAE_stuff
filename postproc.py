@@ -7,6 +7,23 @@ import numpy as np
 import shoebox_gf
 
 
+plt.rcParams['font.size'] = 16           # Global font size
+# plt.rcParams['font.family'] = 'DejaVu Sans'  # Or 'Arial', 'serif', etc.
+plt.rcParams['font.family'] = 'serif'  # disgusting
+plt.rcParams['text.usetex'] = True
+
+# import matplotlib
+# matplotlib.use("pgf")
+# matplotlib.rcParams.update(
+#     {
+#         "pgf.texsystem": "pdflatex",
+#         "font.family": "serif",
+#         "text.usetex": True,
+#         "pgf.rcfonts": False,
+#     }
+# )
+
+
 def array_to_time_series(array, step_in_minutes=1, start_time="2025-04-29 00:00"):
     array = np.array(array)
     step = pd.Timedelta(minutes=step_in_minutes)
@@ -42,17 +59,21 @@ def get_postproc_info(shoebox, actuation_sequence, temperature_outside, time_del
 
 def plot_actuation_sequence(actuation_sequence, temperature_operative, axes_object):
     # Temperature plot
-    axes_object.set_ylabel('Temperature in °C', color='b')
-    axes_object.tick_params(axis='y', labelcolor='b')
+    axes_object.set_ylabel('Operative Temperature in °C')
+    # axes_object.tick_params(axis='y')
     axes_object.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    axes_object.plot(array_to_time_series(temperature_operative), 'b-', label='Temperature_operative')
+    line1, = axes_object.plot(array_to_time_series(temperature_operative), 'b-', label='$T_{op}$')
+    axes_object.tick_params(axis='x', labelrotation=45)
 
     # Control actions plot
     ax_top2 = axes_object.twinx()
-    ax_top2.plot(array_to_time_series(actuation_sequence), 'g-', label='Control Actions')
-    ax_top2.set_ylabel('actuation sequence (heating power in W)')
+    line2, = ax_top2.plot(array_to_time_series(actuation_sequence), 'g-', label='$P_{heat}$')
+    ax_top2.set_ylabel('Heating Power in W')
+
     # Adding legends
-    axes_object.legend()
+    lines = [line1, line2]
+    labels = [line.get_label() for line in lines]
+    axes_object.legend(lines, labels, loc='upper right')
     axes_object.grid()
 
 
@@ -68,11 +89,20 @@ def plot_temperatures(temperature_operative, temperature_air, temperature_surfac
 
 def plot_power_cost(cost_power, power_weight_curve, axes_object):
     axes_object.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    axes_object.plot(array_to_time_series(cost_power), label="cost power", color="orange")
-    axes_object.grid()
-    axes_object.legend()
+    line1, = axes_object.plot(array_to_time_series(cost_power), label="$p(t) \cdot w(t)$", color="orange")
     ax_cost2 = axes_object.twinx()
-    ax_cost2.plot(array_to_time_series(power_weight_curve), label="power weight curve")
+    line2, = ax_cost2.plot(array_to_time_series(power_weight_curve), label="$w(t)$")
+    axes_object.set_ylabel('Weighted Power in $\mathrm{W_w}$')
+    axes_object.set_ylim(0, 1000)
+    ax_cost2.set_ylabel('Weighting Function')
+    ax_cost2.set_ylim(0, 1.01)
+    axes_object.tick_params(axis='x', labelrotation=45)
+
+    # Adding legends
+    lines = [line1, line2]
+    labels = [line.get_label() for line in lines]
+    axes_object.legend(lines, labels, loc='upper left')
+    axes_object.grid()
 
 
 def plot_comfort(cost_comfort, temperature_operative, axes_object):
@@ -148,7 +178,7 @@ def compare_2runs(data, property_dict):
         return
 
     # plot
-    fig, axs = plt.subplots(nrows=2, ncols=2, sharex=True)
+    fig, axs = plt.subplots(nrows=2, ncols=2, sharex=False, figsize=(10, 8))
     plot_actuation_sequence(np.repeat(run1['actuation_sequence'], 60), run1['postproc_dict']['temperature_operative'], axes_object=axs[0, 0])
     plot_power_cost(run1['postproc_dict']["cost_power"], pwc, axs[0, 1])
     plot_actuation_sequence(np.repeat(run2['actuation_sequence'], 60), run2['postproc_dict']['temperature_operative'], axes_object=axs[1, 0])
@@ -167,11 +197,10 @@ def pp_from_file(filename):
     # Pivot to 2D grid format
     pivot = df.pivot(index='storage_thickness', columns='insulation_thickness', values='grid_load_index')
 
-    # compare_2runs(data, {'insulation_thickness': (0.18, 0.18), 'storage_thickness': (.04, .08)})
 
     # Create meshgrid from index and columns
-    x_vals = pivot.columns.values
-    y_vals = pivot.index.values
+    x_vals = pivot.columns.values # x = insulation thickness
+    y_vals = pivot.index.values # y = storage thickness
     x_grid, y_grid = np.meshgrid(x_vals, y_vals)
 
     # Extract z values
@@ -181,31 +210,35 @@ def pp_from_file(filename):
     mid_x_idx = len(x_vals) // 2
     mid_y_idx = len(y_vals) // 2
 
+    compare_2runs(data, {'insulation_thickness': (x_vals[mid_x_idx], x_vals[mid_x_idx]), 'storage_thickness': (y_vals[mid_y_idx], y_vals[mid_y_idx + 2])})
+
+
+
     # Create figure with 3 subplots
     fig = plt.figure(figsize=(15, 5))
 
     # --- Plot 1: 3D Surface ---
     ax1 = fig.add_subplot(131, projection='3d')
     ax1.plot_surface(x_grid, y_grid, z_vals, cmap='viridis')
-    ax1.set_title("3D Surface")
-    ax1.set_xlabel("x")
-    ax1.set_ylabel("y")
-    ax1.set_zlabel("z")
+    # ax1.set_title("3D Surface")
+    ax1.set_xlabel("$d_{ins}$ in m")
+    ax1.set_ylabel("$d_{sto}$ in m")
+    ax1.set_zlabel("$I_{gs}$")
 
     # --- Plot 2: Cross-section at middle x (fixed x, vary y) ---
     ax2 = fig.add_subplot(132)
     ax2.plot(y_vals, z_vals[:, mid_x_idx])
-    ax2.set_title(f"Cross-section at x = {x_vals[mid_x_idx]:.2f}")
-    ax2.set_xlabel("y")
-    ax2.set_ylabel("z")
+    ax2.set_title(f"Cross-section at $d_{{ins}}$ = {x_vals[mid_x_idx]:.2f} m")
+    ax2.set_xlabel("$d_{sto}$ in m")
+    ax2.set_ylabel("$I_{gs}$")
     ax2.grid(True)
 
     # --- Plot 3: Cross-section at middle y (fixed y, vary x) ---
     ax3 = fig.add_subplot(133)
     ax3.plot(x_vals, z_vals[mid_y_idx, :])
-    ax3.set_title(f"Cross-section at y = {y_vals[mid_y_idx]:.2f}")
-    ax3.set_xlabel("x")
-    ax3.set_ylabel("z")
+    ax3.set_title(f"Cross-section at $d_{{sto}}$ = {y_vals[mid_y_idx]:.2f} m")
+    ax3.set_xlabel("$d_{ins}$ in m")
+    ax3.set_ylabel("$I_{gs}$")
     ax3.grid(True)
 
     plt.tight_layout()
