@@ -6,7 +6,7 @@ import copy
 import pandas as pd
 import pickle
 from functools import partial
-
+  
 from multiprocessing import Pool
 
 from numba import float64
@@ -352,7 +352,7 @@ def multiproc_wrapper(parameter_dict):
     return results_dict
 
 
-def main_script(outfile_name, plotting=True):
+def main_script(outfile_name, num_vals=20, plotting=True):
     # Model parameters
     basic_parameter_dict = get_basic_parameters()
     temperature_outside_series = basic_parameter_dict["temperature_outside_series"]
@@ -368,9 +368,12 @@ def main_script(outfile_name, plotting=True):
     # Optimize control actions
     # print("insulation_thickness, storage_thickness, comfort penalty weight, peak alignment factor, total energy turnover, grid burden, cost power, cost comfort, cost_control, computation time in s")
     # storage_thickness_list = 0.01 * np.array(list(range(1, 11)))  # 0.01, 0.02, ..., 0.1
-    storage_thickness_array = np.linspace(0.01, 0.05, 20)
+    storage_thickness_array = np.linspace(0.01, 0.05, num_vals)
+    # storage_thickness_array = np.array([0.025])
+
     # insulation_thickness_list = 0.03 * np.array(list(range(1, 11)))  # 0.03, 0.06, ..., 0.3
-    insulation_thickness_array = np.linspace(0.05, 0.3, 20)
+    insulation_thickness_array = np.linspace(0.05, 0.3, num_vals)
+    # insulation_thickness_array = np.array([0.05, 0.15, 0.3])
 
     comfort_penalty_weight = 1.e7
     control_penalty_weight = 1.e6
@@ -423,7 +426,6 @@ def main_script(outfile_name, plotting=True):
     # end_time = time.time()
     # print(f'Time taken: {end_time - start_time:.2f}')
 
-
     num_processes = 8
     # start_time = time.time()
     # with Pool(processes=num_processes) as pool:
@@ -431,15 +433,16 @@ def main_script(outfile_name, plotting=True):
     # end_time = time.time()
     # print(f'Time taken: {end_time - start_time:.2f}')
 
-
     start_time = time.time()
     with Pool(processes=num_processes) as pool:
         for i, result in enumerate(pool.imap_unordered(multiproc_wrapper, parameter_list)):
-            print(f"Completed {i + 1}/{len(parameter_list)}", flush=True)
+            end_time = time.time()
+            print(f'Completed {i + 1} / {len(parameter_list)}, time: {end_time - start_time:.2f} / {(end_time - start_time) * len(parameter_list)/(i + 1):.2f}', end='\r', flush=True)
             results_list.append(result)
     end_time = time.time()
-    print(f'Time taken: {end_time - start_time:.2f}')
+    print(f'\nTime taken: {end_time - start_time:.2f}')
 
+    print(f'saving results to: {outfile_name}')
     if outfile_name is not None:
         with open(outfile_name, 'wb') as f:
             pickle.dump(results_list, f)
@@ -448,6 +451,24 @@ def main_script(outfile_name, plotting=True):
 
 
 if __name__ == "__main__":
-    fn_global = '20250806_results20.pkl'
-    # main_script(outfile_name=fn_global, plotting=False)
-    pp.pp_from_file(fn_global)
+    # fn_global = '20250806_results20.pkl'
+    num_vals = 40
+    fn_global = f'20250916_results{num_vals}.pkl'
+    # main_script(outfile_name=fn_global, num_vals=num_vals, plotting=False)
+
+    myfile = f'20250915_results30.pkl'
+    # myfile = fn_global
+    with open(myfile, 'rb') as f:
+        data = pickle.load(f)
+    ins_list = list(set([element['shoebox_parameters']['insulation_thickness'] for element in data]))
+    ins_list.sort()
+    sto_list = list(set([element['shoebox_parameters']['storage_thickness'] for element in data]))
+    sto_list.sort()
+    sto_idx = 14
+    d_sto = sto_list[sto_idx]
+    d_ins = [ins_list[5], ins_list[17], ins_list[-1]]
+
+    pp.set_style(font_size=14, font_family='Times New Roman', usetex=True)
+    # pp.compare_2runs(data, {'insulation_thickness': (d_ins[1], d_ins[2]), 'storage_thickness': (d_sto, d_sto)}, y_lim=(0, 2000))
+
+    pp.pp_from_file(data, y_idx=14)

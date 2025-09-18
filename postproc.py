@@ -7,21 +7,11 @@ import numpy as np
 import shoebox_gf
 
 
-plt.rcParams['font.size'] = 16           # Global font size
-# plt.rcParams['font.family'] = 'DejaVu Sans'  # Or 'Arial', 'serif', etc.
-plt.rcParams['font.family'] = 'serif'  # disgusting
-plt.rcParams['text.usetex'] = True
-
-# import matplotlib
-# matplotlib.use("pgf")
-# matplotlib.rcParams.update(
-#     {
-#         "pgf.texsystem": "pdflatex",
-#         "font.family": "serif",
-#         "text.usetex": True,
-#         "pgf.rcfonts": False,
-#     }
-# )
+def set_style(font_size=16, font_family='Times New Roman', usetex=True):
+    # some font families: 'DejaVu Sans', 'Arial', 'serif', etc.
+    plt.rcParams['font.size'] = font_size           # Global font size
+    plt.rcParams['font.family'] = font_family
+    plt.rcParams['text.usetex'] = usetex
 
 
 def array_to_time_series(array, step_in_minutes=1, start_time="2025-04-29 00:00"):
@@ -87,13 +77,13 @@ def plot_temperatures(temperature_operative, temperature_air, temperature_surfac
     axes_object.legend()
 
 
-def plot_power_cost(cost_power, power_weight_curve, axes_object):
+def plot_power_cost(cost_power, power_weight_curve, axes_object, y_lim=(0, 1000)):
     axes_object.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     line1, = axes_object.plot(array_to_time_series(cost_power), label="$p(t) \cdot w(t)$", color="orange")
     ax_cost2 = axes_object.twinx()
     line2, = ax_cost2.plot(array_to_time_series(power_weight_curve), label="$w(t)$")
     axes_object.set_ylabel('Weighted Power in $\mathrm{W_w}$')
-    axes_object.set_ylim(0, 1000)
+    axes_object.set_ylim(y_lim[0], y_lim[1])
     ax_cost2.set_ylabel('Weighting Function')
     ax_cost2.set_ylim(0, 1.01)
     axes_object.tick_params(axis='x', labelrotation=45)
@@ -160,9 +150,28 @@ def plot_grid_stress_index(shoebox, filename="20250508_actuation_results_u0.3_tc
     plt.show(block=True)
 
 
-def compare_2runs(data, property_dict):
+def find_run(data, property_dict):
+    run1 = None
+    pkeys = list(property_dict.keys())
+    for run in data:
+        if (run['shoebox_parameters'][pkeys[0]] == property_dict[pkeys[0]][0] and
+                run['shoebox_parameters'][pkeys[1]] == property_dict[pkeys[1]][0]):
+            run1 = run
+            break
+    if run1 is None:
+        print('run not found')
+    return run1
+
+
+def compare_2runs(data, property_dict, y_lim=(0, 1000), print_to_console=True):
+    """
+    :param data: the unpickeled list of results dictionaries
+    :param property_dict: dictionary that holds the parameters of the two runs to compare
+    """
     pwc = shoebox_gf.get_basic_parameters()['power_weight_curve']
 
+    run1 = None
+    run2 = None
     # find the runs
     pkeys = list(property_dict.keys())
     for run in data:
@@ -177,26 +186,37 @@ def compare_2runs(data, property_dict):
         print('not all runs found')
         return
 
+    if print_to_console:
+        print('run, total_energy_turnover, grid_burden, grid_stress_index')
+        print(f'1, {run1["postproc_dict"]["total_energy_turnover"]:.2e}, {run1["postproc_dict"]["grid_burden"]:.2e}, {run1["postproc_dict"]["grid_stress_index"]:.3f}')
+        print(f'2, {run2["postproc_dict"]["total_energy_turnover"]:.2e}, {run2["postproc_dict"]["grid_burden"]:.2e}, {run2["postproc_dict"]["grid_stress_index"]:.3f}')
+
     # plot
     fig, axs = plt.subplots(nrows=2, ncols=2, sharex=False, figsize=(10, 8))
     plot_actuation_sequence(np.repeat(run1['actuation_sequence'], 60), run1['postproc_dict']['temperature_operative'], axes_object=axs[0, 0])
-    plot_power_cost(run1['postproc_dict']["cost_power"], pwc, axs[0, 1])
+    plot_power_cost(run1['postproc_dict']["cost_power"], pwc, axs[0, 1], y_lim=y_lim)
     plot_actuation_sequence(np.repeat(run2['actuation_sequence'], 60), run2['postproc_dict']['temperature_operative'], axes_object=axs[1, 0])
-    plot_power_cost(run2['postproc_dict']["cost_power"], pwc, axs[1, 1])
+    plot_power_cost(run2['postproc_dict']["cost_power"], pwc, axs[1, 1], y_lim=y_lim)
     plt.tight_layout()
     plt.show(block=True)
 
 
-def pp_from_file(filename):
-    with open(filename, 'rb') as f:
-        data = pickle.load(f)
+def pp_from_file(data, x_idx=None, y_idx=None):
+    # plt.style.use("seaborn-v0_8")
+    # Make sure TeX rendering is OFF
+    # plt.rcParams["text.usetex"] = False
+
+    # "seaborn-v0_8" → modern, clean, inspired by seaborn.
+    # "ggplot" → red grid background, ggplot2 - inspired.
+    # "classic" → old - school Matplotlib look.
+    # "dark_background" → perfect for slides.
+
 
     df = pd.DataFrame([s['shoebox_parameters'] for s in data])
     df['grid_load_index'] = [s['postproc_dict']['grid_stress_index'] for s in data]
 
     # Pivot to 2D grid format
     pivot = df.pivot(index='storage_thickness', columns='insulation_thickness', values='grid_load_index')
-
 
     # Create meshgrid from index and columns
     x_vals = pivot.columns.values # x = insulation thickness
@@ -207,12 +227,13 @@ def pp_from_file(filename):
     z_vals = pivot.values
 
     # Find middle indices
-    mid_x_idx = len(x_vals) // 2
-    mid_y_idx = len(y_vals) // 2
+    if x_idx is None:
+        x_idx = len(x_vals) // 2
+    if y_idx is None:
+        y_idx = len(y_vals) // 2
 
-    compare_2runs(data, {'insulation_thickness': (x_vals[mid_x_idx], x_vals[mid_x_idx]), 'storage_thickness': (y_vals[mid_y_idx], y_vals[mid_y_idx + 2])})
 
-
+    compare_2runs(data, {'insulation_thickness': (x_vals[x_idx], x_vals[x_idx]), 'storage_thickness': (y_vals[y_idx], y_vals[y_idx + 2])})
 
     # Create figure with 3 subplots
     fig = plt.figure(figsize=(15, 5))
@@ -221,24 +242,24 @@ def pp_from_file(filename):
     ax1 = fig.add_subplot(131, projection='3d')
     ax1.plot_surface(x_grid, y_grid, z_vals, cmap='viridis')
     # ax1.set_title("3D Surface")
-    ax1.set_xlabel("$d_{ins}$ in m")
-    ax1.set_ylabel("$d_{sto}$ in m")
-    ax1.set_zlabel("$I_{gs}$")
+    ax1.set_xlabel("$h_{ins}$ in m")
+    ax1.set_ylabel("$h_{sto}$ in m")
+    ax1.set_zlabel("$GSI$")
 
     # --- Plot 2: Cross-section at middle x (fixed x, vary y) ---
     ax2 = fig.add_subplot(132)
-    ax2.plot(y_vals, z_vals[:, mid_x_idx])
-    ax2.set_title(f"Cross-section at $d_{{ins}}$ = {x_vals[mid_x_idx]:.2f} m")
-    ax2.set_xlabel("$d_{sto}$ in m")
-    ax2.set_ylabel("$I_{gs}$")
+    ax2.plot(y_vals, z_vals[:, x_idx])
+    ax2.set_title(f"Cross-section at $h_{{ins}}$ = {x_vals[x_idx]:.2f} m")
+    ax2.set_xlabel("$h_{sto}$ in m")
+    ax2.set_ylabel("$GSI$")
     ax2.grid(True)
 
     # --- Plot 3: Cross-section at middle y (fixed y, vary x) ---
     ax3 = fig.add_subplot(133)
-    ax3.plot(x_vals, z_vals[mid_y_idx, :])
-    ax3.set_title(f"Cross-section at $d_{{sto}}$ = {y_vals[mid_y_idx]:.2f} m")
-    ax3.set_xlabel("$d_{ins}$ in m")
-    ax3.set_ylabel("$I_{gs}$")
+    ax3.plot(x_vals, z_vals[y_idx, :])
+    ax3.set_title(f"Cross-section at $h_{{sto}}$ = {y_vals[y_idx]:.2f} m")
+    ax3.set_xlabel("$h_{ins}$ in m")
+    ax3.set_ylabel("$GSI$")
     ax3.grid(True)
 
     plt.tight_layout()
