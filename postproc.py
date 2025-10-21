@@ -202,16 +202,6 @@ def compare_2runs(data, property_dict, y_lim=(0, 1000), print_to_console=True):
 
 
 def pp_from_file(data, x_idx=None, y_idx=None):
-    # plt.style.use("seaborn-v0_8")
-    # Make sure TeX rendering is OFF
-    # plt.rcParams["text.usetex"] = False
-
-    # "seaborn-v0_8" → modern, clean, inspired by seaborn.
-    # "ggplot" → red grid background, ggplot2 - inspired.
-    # "classic" → old - school Matplotlib look.
-    # "dark_background" → perfect for slides.
-
-
     df = pd.DataFrame([s['shoebox_parameters'] for s in data])
     df['grid_load_index'] = [s['postproc_dict']['grid_stress_index'] for s in data]
 
@@ -232,7 +222,6 @@ def pp_from_file(data, x_idx=None, y_idx=None):
     if y_idx is None:
         y_idx = len(y_vals) // 2
 
-
     compare_2runs(data, {'insulation_thickness': (x_vals[x_idx], x_vals[x_idx]), 'storage_thickness': (y_vals[y_idx], y_vals[y_idx + 2])})
 
     # Create figure with 3 subplots
@@ -242,8 +231,8 @@ def pp_from_file(data, x_idx=None, y_idx=None):
     ax1 = fig.add_subplot(131, projection='3d')
     ax1.plot_surface(x_grid, y_grid, z_vals, cmap='viridis')
     # ax1.set_title("3D Surface")
-    ax1.set_xlabel("$h_{ins}$ in m")
-    ax1.set_ylabel("$h_{sto}$ in m")
+    ax1.set_xlabel("$h_{ins}$ in m", labelpad=10)
+    ax1.set_ylabel("$h_{sto}$ in m", labelpad=10)
     ax1.set_zlabel("$GSI$")
 
     # --- Plot 2: Cross-section at middle x (fixed x, vary y) ---
@@ -261,6 +250,7 @@ def pp_from_file(data, x_idx=None, y_idx=None):
     ax3.set_xlabel("$h_{ins}$ in m")
     ax3.set_ylabel("$GSI$")
     ax3.grid(True)
+
 
     plt.tight_layout()
     plt.show(block=True)

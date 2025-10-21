@@ -6,12 +6,13 @@ import copy
 import pandas as pd
 import pickle
 from functools import partial
-  
+
 from multiprocessing import Pool
 
 from numba import float64
 from numba.experimental import jitclass
 from numba import njit
+import sys
 
 import pso
 import postproc as pp
@@ -134,16 +135,20 @@ class ShoeBox:
                 # change temperatures
                 heating_to_storage = heating_power * (1. - convective_portion_local)
                 heating_to_air = heating_power * convective_portion_local
-                storage_to_outside = thermal_transmittance_local * (temperature_air_local - temperature_outside_series[global_index])
+                storage_to_outside = thermal_transmittance_local * (
+                        temperature_air_local - temperature_outside_series[global_index])
                 Rsi = 0.13  # in m2K/W
-                air_to_storage = (temperature_air_local - temperature_storage_local) * (area_hull_local + area_ceiling_local) / Rsi
+                air_to_storage = (temperature_air_local - temperature_storage_local) * (
+                        area_hull_local + area_ceiling_local) / Rsi
                 dT_air = (heating_to_air - air_to_storage) / capacity_air_local * time_delta
-                dT_storage = (heating_to_storage + air_to_storage - storage_to_outside) / capacity_storage_local * time_delta
+                dT_storage = (
+                                     heating_to_storage + air_to_storage - storage_to_outside) / capacity_storage_local * time_delta
                 temperature_air_local += dT_air
                 temperature_storage_local += dT_storage
 
-                surface_temperature = ((area_hull_local + area_ceiling_local) * temperature_storage_local + area_floor_local * temperature_supply_local) / (
-                        area_hull_local + area_floor_local + area_ceiling_local)
+                surface_temperature = ((
+                                               area_hull_local + area_ceiling_local) * temperature_storage_local + area_floor_local * temperature_supply_local) / (
+                                              area_hull_local + area_floor_local + area_ceiling_local)
                 operative_temperature = 0.5 * (temperature_air_local + surface_temperature)
 
                 # register results
@@ -209,25 +214,15 @@ def model(shoebox, heating_strategy, temperature_outside_series, time_delta, sub
 
 
 def cost_function_demand_response(heating_strategy, power_weight_curve,
-                                  temperature_operative_series, temperature_max, temperature_min, heating_min=0, heating_max=6000,
+                                  temperature_operative_series, temperature_max, temperature_min, heating_min=0,
+                                  heating_max=6000,
                                   power_penalty_weight=1., comfort_penalty_weight=1.e5, control_penalty_weight=1.e6):
     control_penalty_array = (np.maximum(heating_strategy - heating_max, 0)
                              + np.maximum(heating_min - heating_strategy, 0))
-    #
-    # heating_strategy = np.maximum(heating_strategy, heating_min)
-    # heating_strategy = np.minimum(heating_strategy, heating_max)
 
     power_penalty_array = heating_strategy * power_weight_curve
-    # comfort_penalty_base_array = (temperature_operative_series - 0.5 * (temperature_max + temperature_min)) / comfort_penalty_weight
-    # comfort_penalty_soft_array = (np.maximum(temperature_operative_series - temperature_max - .1, 0)
-    #                               + np.maximum(temperature_min + .1 - temperature_operative_series, 0)) / np.sqrt(comfort_penalty_weight)
-    comfort_penalty_hard_array = (np.maximum(temperature_operative_series - temperature_max, 0)
-                                  + np.maximum(temperature_min - temperature_operative_series, 0))
-    # comfort_penalty_array = comfort_penalty_base_array + comfort_penalty_soft_array + comfort_penalty_hard_array
-    comfort_penalty_array = comfort_penalty_hard_array
-
-    if max(comfort_penalty_hard_array) > 0:
-        x = 0
+    comfort_penalty_array = (np.maximum(temperature_operative_series - temperature_max, 0)
+                             + np.maximum(temperature_min - temperature_operative_series, 0))
 
     return {"cost_total": (power_penalty_weight * power_penalty_array.sum()
                            + comfort_penalty_weight * comfort_penalty_array.sum()
@@ -235,6 +230,15 @@ def cost_function_demand_response(heating_strategy, power_weight_curve,
             "cost_power": power_penalty_weight * power_penalty_array,
             "cost_comfort": comfort_penalty_weight * comfort_penalty_array,
             "cost_control": control_penalty_weight * control_penalty_array}
+
+
+def cost_function_pso_slick(heating_strategy, power_weight_curve,
+                            temperature_operative_series, temperature_max, temperature_min,
+                            power_penalty_weight=1., comfort_penalty_weight=1.e5):
+    power_penalty_array = heating_strategy * power_weight_curve
+    comfort_penalty_array = (np.maximum(temperature_operative_series - temperature_max, 0)
+                             + np.maximum(temperature_min - temperature_operative_series, 0))
+    return comfort_penalty_weight * comfort_penalty_array.sum() + power_penalty_weight * power_penalty_array.sum()
 
 
 def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, time_delta,
@@ -247,7 +251,8 @@ def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, time_del
 
     cost_dict = cost_function_demand_response(np.repeat(heating_strategy, substeps_per_actuation), power_weight_curve,
                                               temperature_operative_series, temperature_max, temperature_min,
-                                              comfort_penalty_weight=comfort_penalty_weight, control_penalty_weight=control_penalty_weight)
+                                              comfort_penalty_weight=comfort_penalty_weight,
+                                              control_penalty_weight=control_penalty_weight)
     # return np.dot(cost_dict['cost_comfort'], cost_dict['cost_comfort']) #+ np.dot(cost_dict['cost_control'], cost_dict['cost_control'])
     if return_full_dict:
         return cost_dict
@@ -314,17 +319,11 @@ def get_basic_parameters():
             "power_weight_curve": power_weight_curve}
 
 
-def single_simulation_run(wrapped_func, n_particles=30, n_iters=1000, stepsize=500, randomness=.3):
-    solution = pso.pso(wrapped_func, dim=24, n_particles=n_particles, n_iters=n_iters, print_every=None, bounds=(0, 3000),
-                       stepsize=stepsize, c1=1, c2=1, randomness=randomness, visualize=False, num_processes=1)
-    actuation_sequence = solution[0]
-    return actuation_sequence
-
-
 def multiproc_wrapper(parameter_dict):
     shoebox = ShoeBox(**parameter_dict['shoebox_parameters'])
     wrapped_func = partial(cost_wrapper, shoebox=shoebox,
-                           temperature_outside_series=parameter_dict['simulation_parameters']['temperature_outside_series'],
+                           temperature_outside_series=parameter_dict['simulation_parameters'][
+                               'temperature_outside_series'],
                            time_delta=parameter_dict['simulation_parameters']['time_delta'],
                            power_weight_curve=parameter_dict['simulation_parameters']['power_weight_curve'],
                            temperature_min=parameter_dict['simulation_parameters']['temperature_min'],
@@ -333,142 +332,127 @@ def multiproc_wrapper(parameter_dict):
                            comfort_penalty_weight=parameter_dict['simulation_parameters']['comfort_penalty_weight'],
                            control_penalty_weight=parameter_dict['simulation_parameters']['control_penalty_weight'])
 
-    actuation_sequence = single_simulation_run(wrapped_func, n_iters=1000)
+    solution = pso.pso(wrapped_func, dim=24, n_particles=30, n_iters=1000, print_every=None, bounds=(0, 3000),
+                       stepsize=500, c1=1, c2=1, randomness=.3, visualize=False, num_processes=1)
+    actuation_sequence = solution[0]
 
-    shoebox_fresh = ShoeBox(**parameter_dict['shoebox_parameters'])
-    postproc_dict = pp.get_postproc_info(shoebox=shoebox_fresh,
-                                         actuation_sequence=actuation_sequence,
-                                         temperature_outside=parameter_dict['simulation_parameters']['temperature_outside_series'],
-                                         time_delta=parameter_dict['simulation_parameters']['time_delta'],
-                                         power_weight_curve=parameter_dict['simulation_parameters']['power_weight_curve'],
-                                         temperature_min=parameter_dict['simulation_parameters']['temperature_min'],
-                                         temperature_max=parameter_dict['simulation_parameters']['temperature_max'],
-                                         substeps_per_actuation=parameter_dict['simulation_parameters']['substeps_per_actuation'],
-                                         comfort_penalty_weight=parameter_dict['simulation_parameters']['comfort_penalty_weight'])
+    results_dict = {'actuation_sequence': actuation_sequence,
+                    'shoebox_parameters': parameter_dict['shoebox_parameters'],
+                    'simulation_parameters': parameter_dict['simulation_parameters']}
 
-    results_dict = {'postproc_dict': postproc_dict,
-                    'actuation_sequence': actuation_sequence,
-                    'shoebox_parameters': parameter_dict['shoebox_parameters']}
     return results_dict
 
 
-def main_script(outfile_name, num_vals=20, plotting=True):
+def simulation_script(outfile_name, num_vals=20, num_processes=8):
     # Model parameters
     basic_parameter_dict = get_basic_parameters()
     temperature_outside_series = basic_parameter_dict["temperature_outside_series"]
     time_delta = basic_parameter_dict["time_delta"]
     power_weight_curve = basic_parameter_dict["power_weight_curve"]
-    # heating_power_initial = basic_parameter_dict["heating_power_initial"]
-    # bounds = basic_parameter_dict["bounds"]
     temperature_min = basic_parameter_dict["temperature_min"]
     temperature_max = basic_parameter_dict["temperature_max"]
     substeps_per_actuation = basic_parameter_dict["substeps_per_actuation"]
-    lengths = basic_parameter_dict["lengths"]
 
-    # Optimize control actions
-    # print("insulation_thickness, storage_thickness, comfort penalty weight, peak alignment factor, total energy turnover, grid burden, cost power, cost comfort, cost_control, computation time in s")
-    # storage_thickness_list = 0.01 * np.array(list(range(1, 11)))  # 0.01, 0.02, ..., 0.1
     storage_thickness_array = np.linspace(0.01, 0.05, num_vals)
-    # storage_thickness_array = np.array([0.025])
-
-    # insulation_thickness_list = 0.03 * np.array(list(range(1, 11)))  # 0.03, 0.06, ..., 0.3
     insulation_thickness_array = np.linspace(0.05, 0.3, num_vals)
-    # insulation_thickness_array = np.array([0.05, 0.15, 0.3])
 
     comfort_penalty_weight = 1.e7
     control_penalty_weight = 1.e6
 
     # shoebox_init = copy.deepcopy(shoebox)
     results_list = list()
-    plotting = False
 
     # assemble list of parameter-tuples
     parameter_list = list()
-    num_runs = len(storage_thickness_array) * len(insulation_thickness_array)
-    for i in range(len(storage_thickness_array)):
-        storage_thickness = storage_thickness_array[i]
-        for j in range(len(insulation_thickness_array)):
+    for i, storage_thickness in enumerate(storage_thickness_array):
+        for j, insulation_thickness in enumerate(insulation_thickness_array):
             insulation_thickness = insulation_thickness_array[j]
-            shoebox_parameters = {'length1': 5., 'length2': 5., 'length3': 5., 'heat_max': 6000., 'storage_thickness': storage_thickness,
-                                  'temp_init': 20., 'convective_portion': 0.3, 'insulation_thickness': insulation_thickness}
+            shoebox_parameters = {'length1': 5., 'length2': 5., 'length3': 5., 'heat_max': 6000.,
+                                  'storage_thickness': storage_thickness,
+                                  'temp_init': 20., 'convective_portion': 0.3,
+                                  'insulation_thickness': insulation_thickness}
             simulation_parameters = {'temperature_outside_series': temperature_outside_series,
                                      'time_delta': time_delta, 'power_weight_curve': power_weight_curve,
                                      'temperature_min': temperature_min, 'temperature_max': temperature_max,
-                                     'substeps_per_actuation': substeps_per_actuation, 'comfort_penalty_weight': comfort_penalty_weight,
+                                     'substeps_per_actuation': substeps_per_actuation,
+                                     'comfort_penalty_weight': comfort_penalty_weight,
                                      'control_penalty_weight': control_penalty_weight}
-            parameter_list.append({'shoebox_parameters': shoebox_parameters, 'simulation_parameters': simulation_parameters})
-
-            # shoebox = ShoeBox(**shoebox_parameters)
-            # wrapped_func = partial(cost_wrapper, shoebox=shoebox, temperature_outside_series=temperature_outside_series,
-            #                        time_delta=time_delta, power_weight_curve=power_weight_curve,
-            #                        temperature_min=temperature_min, temperature_max=temperature_max,
-            #                        substeps_per_actuation=substeps_per_actuation, comfort_penalty_weight=comfort_penalty_weight,
-            #                        control_penalty_weight=control_penalty_weight, return_full_dict=False)
-            #
-            # actuation_sequence = single_simulation_run(wrapped_func, n_iters=500)
-            #
-            # shoebox_fresh = ShoeBox(**shoebox_parameters)
-            # postproc_dict = pp.get_postproc_info(shoebox=shoebox_fresh, actuation_sequence=actuation_sequence,
-            #                                      temperature_outside=temperature_outside_series, time_delta=time_delta,
-            #                                      power_weight_curve=power_weight_curve,
-            #                                      temperature_min=temperature_min, temperature_max=temperature_max,
-            #                                      substeps_per_actuation=substeps_per_actuation,
-            #                                      comfort_penalty_weight=comfort_penalty_weight)
-            #
-            # results_list.append({'postproc_dict': postproc_dict,
-            #                      'actuation_sequence': actuation_sequence,
-            #                      'shoebox_parameters': shoebox_parameters})
-
-    # start_time = time.time()
-    # for i, parameter_dict in enumerate(parameter_list):
-    #     print(f'run number: {i + 1} of {len(parameter_list)}')
-    #     results_list.append(multiproc_wrapper(parameter_dict))
-    # end_time = time.time()
-    # print(f'Time taken: {end_time - start_time:.2f}')
-
-    num_processes = 8
-    # start_time = time.time()
-    # with Pool(processes=num_processes) as pool:
-    #     results_list = pool.map(multiproc_wrapper, parameter_list)
-    # end_time = time.time()
-    # print(f'Time taken: {end_time - start_time:.2f}')
+            parameter_list.append(
+                {'shoebox_parameters': shoebox_parameters, 'simulation_parameters': simulation_parameters})
 
     start_time = time.time()
     with Pool(processes=num_processes) as pool:
         for i, result in enumerate(pool.imap_unordered(multiproc_wrapper, parameter_list)):
             end_time = time.time()
-            print(f'Completed {i + 1} / {len(parameter_list)}, time: {end_time - start_time:.2f} / {(end_time - start_time) * len(parameter_list)/(i + 1):.2f}', end='\r', flush=True)
+            print(
+                f'Completed {i + 1} / {len(parameter_list)}, time: {end_time - start_time:.2f} / {(end_time - start_time) * len(parameter_list) / (i + 1):.2f}',
+                # end='\r', flush=True)
+                flush = True)
+            # sys.stdout.flush() chattie suggested this, but it does not work
             results_list.append(result)
     end_time = time.time()
     print(f'\nTime taken: {end_time - start_time:.2f}')
 
-    print(f'saving results to: {outfile_name}')
     if outfile_name is not None:
+        print(f'saving results to: {outfile_name}')
         with open(outfile_name, 'wb') as f:
             pickle.dump(results_list, f)
-    # if plotting:
-    #     pp.post_proc(postproc_dict, actuation_sequence=np.repeat(actuation_sequence, substeps_per_actuation), power_weight_curve=power_weight_curve)
+    else:
+        print('computation done. no results file specified.')
 
 
-if __name__ == "__main__":
-    # fn_global = '20250806_results20.pkl'
-    num_vals = 40
-    fn_global = f'20250916_results{num_vals}.pkl'
-    # main_script(outfile_name=fn_global, num_vals=num_vals, plotting=False)
-
-    myfile = f'20250915_results30.pkl'
-    # myfile = fn_global
-    with open(myfile, 'rb') as f:
+def plot_script(results_file):
+    with open(results_file, 'rb') as f:
         data = pickle.load(f)
+
+    if True:
+        # add postproc info
+        for results_dict in data:
+            shoebox_fresh = ShoeBox(**results_dict['shoebox_parameters'])
+            postproc_dict = pp.get_postproc_info(shoebox=shoebox_fresh,
+                                                 actuation_sequence=results_dict['actuation_sequence'],
+                                                 temperature_outside=results_dict['simulation_parameters'][
+                                                     'temperature_outside_series'],
+                                                 time_delta=results_dict['simulation_parameters']['time_delta'],
+                                                 power_weight_curve=results_dict['simulation_parameters'][
+                                                     'power_weight_curve'],
+                                                 temperature_min=results_dict['simulation_parameters']['temperature_min'],
+                                                 temperature_max=results_dict['simulation_parameters']['temperature_max'],
+                                                 substeps_per_actuation=results_dict['simulation_parameters'][
+                                                     'substeps_per_actuation'],
+                                                 comfort_penalty_weight=results_dict['simulation_parameters'][
+                                                     'comfort_penalty_weight'])
+            results_dict['postproc_dict'] = postproc_dict
+
+
+
     ins_list = list(set([element['shoebox_parameters']['insulation_thickness'] for element in data]))
     ins_list.sort()
     sto_list = list(set([element['shoebox_parameters']['storage_thickness'] for element in data]))
     sto_list.sort()
-    sto_idx = 14
-    d_sto = sto_list[sto_idx]
-    d_ins = [ins_list[5], ins_list[17], ins_list[-1]]
+    # sto_idx = 14
+    # d_sto = sto_list[sto_idx]
+    # d_ins = [ins_list[5], ins_list[17], ins_list[-1]]
 
-    pp.set_style(font_size=14, font_family='Times New Roman', usetex=True)
+    pp.set_style(font_size=18, font_family='Times New Roman', usetex=True)
     # pp.compare_2runs(data, {'insulation_thickness': (d_ins[1], d_ins[2]), 'storage_thickness': (d_sto, d_sto)}, y_lim=(0, 2000))
 
-    pp.pp_from_file(data, y_idx=14)
+    # pp.pp_from_file(data, y_idx=14)
+    pp.pp_from_file(data)
+
+
+def main_script():
+    # fn_global = '20250806_results20.pkl'
+    # fn_global = '20251021_results30.pkl'
+    num_vals = 10
+    fn_global = 'dummy_results10.pkl'
+    simulation_script(outfile_name=fn_global, num_vals=num_vals, num_processes=15)
+
+    # results_file = '20250915_results30.pkl'
+    # results_file = '20251021_results30.pkl'
+    results_file = 'dummy_results10.pkl'
+    plot_script(results_file=results_file)
+
+
+if __name__ == "__main__":
+    main_script()
