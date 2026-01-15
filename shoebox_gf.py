@@ -4,6 +4,7 @@ from scipy.optimize import basinhopping
 import time
 import copy
 import pandas as pd
+import matplotlib.pyplot as plt
 import pickle
 from functools import partial
 
@@ -12,7 +13,6 @@ from multiprocessing import Pool
 from numba import float64
 from numba.experimental import jitclass
 from numba import njit
-import sys
 
 import pso
 import postproc as pp
@@ -189,30 +189,6 @@ def model(shoebox, heating_strategy, temperature_outside_series, time_delta, sub
     return result_dict
 
 
-# def cost_function_temperature_setpoint(T_history, T_setpoint):
-#     """this should now call model to get the history of the operative temperature"""
-#     # return sum([(T - T_setpoint) ** 2 for T in T_history[1:]])
-#     return np.sum((T_history[1:] - T_setpoint) ** 2)
-
-
-# def cost_function_demand_response3(heating_strategy, power_weight_curve,
-#                                    temperature_operative_series, temperature_max, temperature_min,
-#                                    power_penalty_weight=1., comfort_penalty_weight=1.e5):
-#     power_penalty = np.dot(heating_strategy, power_weight_curve)
-#
-#     temperature_mid = 0.5 * (temperature_max + temperature_min)
-#     comfort_penalty_array = (temperature_operative_series - temperature_mid) / (temperature_max - temperature_mid)
-#     comfort_penalty_array2 = comfort_penalty_array * comfort_penalty_array
-#     comfort_penalty_array4 = comfort_penalty_array2 * comfort_penalty_array2
-#     comfort_penalty_array8 = comfort_penalty_array4 * comfort_penalty_array4
-#     comfort_penalty_array16 = comfort_penalty_array8 * comfort_penalty_array8
-#     comfort_penalty_array32 = comfort_penalty_array16 * comfort_penalty_array16
-#     comfort_penalty_array64 = comfort_penalty_array32 * comfort_penalty_array32
-#     comfort_penalty = comfort_penalty_array64.sum()
-#
-#     return power_penalty_weight * power_penalty + comfort_penalty_weight * comfort_penalty
-
-
 def cost_function_demand_response(heating_strategy, power_weight_curve,
                                   temperature_operative_series, temperature_max, temperature_min, heating_min=0,
                                   heating_max=6000,
@@ -230,15 +206,6 @@ def cost_function_demand_response(heating_strategy, power_weight_curve,
             "cost_power": power_penalty_weight * power_penalty_array,
             "cost_comfort": comfort_penalty_weight * comfort_penalty_array,
             "cost_control": control_penalty_weight * control_penalty_array}
-
-
-def cost_function_pso_slick(heating_strategy, power_weight_curve,
-                            temperature_operative_series, temperature_max, temperature_min,
-                            power_penalty_weight=1., comfort_penalty_weight=1.e5):
-    power_penalty_array = heating_strategy * power_weight_curve
-    comfort_penalty_array = (np.maximum(temperature_operative_series - temperature_max, 0)
-                             + np.maximum(temperature_min - temperature_operative_series, 0))
-    return comfort_penalty_weight * comfort_penalty_array.sum() + power_penalty_weight * power_penalty_array.sum()
 
 
 def cost_wrapper(heating_strategy, shoebox, temperature_outside_series, time_delta,
@@ -274,6 +241,23 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
     load_curve = load_curve[:-1]  # kick last one
     peak = load_curve.max()
     return load_curve / peak
+
+
+def get_ninja_pv(power_peak=1, input_file='ninja_pv_48.2084_16.3725_uncorrected.csv', resample_in_minutes=15):
+    """
+    this is just a quick-and-dirty assumption of pv power. source: https://www.renewables.ninja/
+    makes the following assumptions:
+    latitude: 48.2084, longitude: 16.3725, (Vienna, Austria)
+    orientation: South, elevation: 35°
+    system-loss: 0.1
+    :param power_peak: peak power in kWp
+    """
+    df = pd.read_csv(input_file, skiprows=3, index_col=0)
+    df.index = pd.to_datetime(df.index)
+    # df.resample(f"{resample_in_minutes}min").interpolate("time")
+    # df.resample(f"{resample_in_minutes}min").interpolate()
+    df.resample("1min").interpolate()
+    return df['electricity'] * power_peak
 
 
 def get_basic_parameters():
@@ -385,10 +369,8 @@ def simulation_script(outfile_name, num_vals=20, num_processes=8):
         for i, result in enumerate(pool.imap_unordered(multiproc_wrapper, parameter_list)):
             end_time = time.time()
             print(
-                f'Completed {i + 1} / {len(parameter_list)}, time: {end_time - start_time:.2f} / {(end_time - start_time) * len(parameter_list) / (i + 1):.2f}',
-                # end='\r', flush=True)
-                flush = True)
-            # sys.stdout.flush() chattie suggested this, but it does not work
+                f'\rCompleted {i + 1} / {len(parameter_list)}, time: {end_time - start_time:.2f} / {(end_time - start_time) * len(parameter_list) / (i + 1):.2f}',
+                end='', flush=True)
             results_list.append(result)
     end_time = time.time()
     print(f'\nTime taken: {end_time - start_time:.2f}')
@@ -416,43 +398,47 @@ def plot_script(results_file):
                                                  time_delta=results_dict['simulation_parameters']['time_delta'],
                                                  power_weight_curve=results_dict['simulation_parameters'][
                                                      'power_weight_curve'],
-                                                 temperature_min=results_dict['simulation_parameters']['temperature_min'],
-                                                 temperature_max=results_dict['simulation_parameters']['temperature_max'],
+                                                 temperature_min=results_dict['simulation_parameters'][
+                                                     'temperature_min'],
+                                                 temperature_max=results_dict['simulation_parameters'][
+                                                     'temperature_max'],
                                                  substeps_per_actuation=results_dict['simulation_parameters'][
                                                      'substeps_per_actuation'],
                                                  comfort_penalty_weight=results_dict['simulation_parameters'][
                                                      'comfort_penalty_weight'])
             results_dict['postproc_dict'] = postproc_dict
 
-
-
     ins_list = list(set([element['shoebox_parameters']['insulation_thickness'] for element in data]))
     ins_list.sort()
     sto_list = list(set([element['shoebox_parameters']['storage_thickness'] for element in data]))
     sto_list.sort()
-    # sto_idx = 14
-    # d_sto = sto_list[sto_idx]
-    # d_ins = [ins_list[5], ins_list[17], ins_list[-1]]
+    sto_idx = 14
+    d_sto = sto_list[sto_idx]
+    d_ins = [ins_list[5], ins_list[17], ins_list[-1]]
 
     pp.set_style(font_size=18, font_family='Times New Roman', usetex=True)
-    # pp.compare_2runs(data, {'insulation_thickness': (d_ins[1], d_ins[2]), 'storage_thickness': (d_sto, d_sto)}, y_lim=(0, 2000))
+    pp.compare_2runs(data, {'insulation_thickness': (d_ins[1], d_ins[2]), 'storage_thickness': (d_sto, d_sto)}, y_lim=(0, 2000))
 
-    # pp.pp_from_file(data, y_idx=14)
-    pp.pp_from_file(data)
+    pp.pp_from_file(data, y_idx=14)
+    # pp.pp_from_file(data)
 
 
 def main_script():
+    # pv_series = get_ninja_pv()
+    # plt.plot(pv_series)
+    # plt.grid()
+    # plt.show(block=True)
+
     # fn_global = '20250806_results20.pkl'
     # fn_global = '20251021_results30.pkl'
     num_vals = 10
     fn_global = 'dummy_results10.pkl'
-    simulation_script(outfile_name=fn_global, num_vals=num_vals, num_processes=15)
+    simulation_script(outfile_name=None, num_vals=num_vals, num_processes=15)
 
-    # results_file = '20250915_results30.pkl'
+    results_file = '20250915_results30.pkl'
     # results_file = '20251021_results30.pkl'
-    results_file = 'dummy_results10.pkl'
-    plot_script(results_file=results_file)
-
+    # results_file = 'dummy_results10.pkl'
+    # plot_script(results_file=results_file)
 
 if __name__ == "__main__":
     main_script()
