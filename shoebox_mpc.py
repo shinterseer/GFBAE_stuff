@@ -11,7 +11,7 @@ class BoundaryConditionsProvider(ABC):
         pass
 
 
-class ConstantScalar(BoundaryConditionsProvider):
+class ConstantScalarBC(BoundaryConditionsProvider):
     def __init__(self, scalar: float):
         self.scalar = scalar
 
@@ -19,7 +19,6 @@ class ConstantScalar(BoundaryConditionsProvider):
         return self.scalar
 
 
-# TODO: implement parent class to generalize MPC
 class MPCControlledObject(ABC):
     def __init__(self, bc_provider: BoundaryConditionsProvider):
         self.bc_provider = bc_provider
@@ -164,40 +163,6 @@ def mpc_inner_varstep(actuation_strategy, steps_per_actuation_sequence, shoebox,
     return cost
 
 
-def mpc(controlled_object: ShoeBox,
-        total_time: float,
-        control_horizon: float,
-        prediction_horizon: float,
-        num_control_steps: int,
-        simulation_step_size: float,
-        model,
-        cost_function,
-        minimizer,
-        constraints: list[list[float]],
-        step_spacing: str = 'uniform') -> np.ndarray[float]:
-    # prepare sequence of actuation steps
-    actuation_steps = list()
-    if step_spacing == 'uniform':
-        pass
-    elif step_spacing == 'exponential':
-        pass
-
-    final_actuation_sequence = list()
-    sim_time = 0
-    while sim_time < total_time:
-        optimized_actuation_sequence = minimizer(cost_function, initial_control,
-                                                 args=(steps_per_actuation_sequence, controlled_object, T_setpoint,
-                                                       temperature_outside,
-                                                       prediction_horizon, control_horizon, delta_time),
-                                                 bounds=bounds)
-
-        final_actuation_sequence.append(optimized_actuation_sequence.x[0])
-        controlled_object.timestep(final_actuation_sequence[-1], temperature_outside)
-        sim_time += simulation_step_size
-
-    return np.array(optimal_control_actions)
-
-
 def mpc_outer_old(num_timesteps, initial_control, steps_per_actuation_sequence, bounds, shoebox, T_setpoint,
                   temperature_outside, prediction_horizon, control_horizon, delta_time):
     optimal_control_actions = list()
@@ -219,6 +184,42 @@ def mpc_outer_old(num_timesteps, initial_control, steps_per_actuation_sequence, 
     print("")
 
     return np.array(optimal_control_actions)
+
+
+def mpc(controlled_object: MPCControlledObject,
+        total_time: float,
+        control_horizon: float,
+        prediction_horizon: float,
+        num_control_steps: int,
+        simulation_step_size: float,
+        cost_function,
+        constraints: list[list[float]],
+        step_spacing: str = 'uniform') -> np.ndarray[float]:
+    # prepare sequence of actuation steps
+    control_intervals = list()
+    if step_spacing == 'uniform':
+        control_intervals = [total_time / num_control_steps] * num_control_steps
+    elif step_spacing == 'exponential':
+        # exponentially growing control intervals
+        total_time = 10
+        num_steps = 10
+        growth_rate = 2
+        for i in range(num_steps):
+            control_intervals.append(total_time * (growth_rate - 1) / (growth_rate ** num_steps - 1) * growth_rate ** i)
+
+    final_control_sequence = list()
+    sim_time = 0
+    while sim_time < total_time:
+        optimized_control_sequence = minimize(cost_function, initial_control,
+                                                 args=(steps_per_actuation_sequence, controlled_object, T_setpoint,
+                                                       prediction_horizon, control_horizon, delta_time),
+                                                 bounds=bounds)
+
+        final_control_sequence.append(optimized_control_sequence.x[0])
+        controlled_object.time_step(final_control_sequence[-1])
+        sim_time += simulation_step_size
+
+    return final_control_sequence
 
 
 def get_property_series(shoebox, actuation_strategy, temperature_outside):
@@ -282,9 +283,13 @@ def post_proc(shoebox, optimal_control_actions, num_timesteps, T_setpoint, tempe
 
 
 def main_script():
+
+
+
+
     # Model parameters
     lengths = (5, 5, 5)
-    bc_provider = ConstantScalar(7.)
+    bc_provider = ConstantScalarBC(7.)
     shoebox = ShoeBox(bc_provider=bc_provider, lengths=lengths)
     temperature_outside = 7
     simulated_time = 8 * 3600
@@ -344,5 +349,4 @@ def main_script():
 
 
 if __name__ == "__main__":
-    # alternative_main()
     main_script()
