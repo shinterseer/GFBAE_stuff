@@ -4,8 +4,8 @@ import time
 import matplotlib.pyplot as plt
 
 
-def model(T_predicted, u, a, b, T_out):
-    T_new = T_predicted + a * u + b * (T_out - T_predicted)
+def model(T_predicted, u, a, b, T_out, delta_t=1):
+    T_new = T_predicted + a * u + b * (T_out - T_predicted) * delta_t
     return T_new
 
 
