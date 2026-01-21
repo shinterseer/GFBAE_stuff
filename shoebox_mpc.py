@@ -84,7 +84,7 @@ class ShoeBox(MPCControlledObject):
                             self.area_hull + self.area_floor + self.area_ceiling)
         return 0.5 * (self.temperature_air + temp_surf)
 
-    def time_step(self, temperature_supply_change_signal, delta_time=120):
+    def time_step(self, temperature_supply_change_signal, delta_time):
         self.temperature_supply += temperature_supply_change_signal * self.temperature_supply_delta_max
 
         # change temperatures
@@ -102,123 +102,125 @@ class ShoeBox(MPCControlledObject):
         self.temperature_storage += dT_storage
 
 
-def model(shoebox, temperature_supply_change_signal, time_delta):
-    # shoebox.time_step(temperature_supply_change_signal, temperature_outside, time_delta)
-    shoebox.time_step(temperature_supply_change_signal, time_delta)
-    return shoebox.get_operative_temperature()
+# def model(shoebox, temperature_supply_change_signal, time_delta):
+#     # shoebox.time_step(temperature_supply_change_signal, temperature_outside, time_delta)
+#     shoebox.time_step(temperature_supply_change_signal, time_delta)
+#     return shoebox.get_operative_temperature()
 
 
-def cost_function(T_history, T_setpoint):
-    return np.sum((T_history[1:] - T_setpoint) ** 2)
+def cost_function(temperature_history, temperature_setpoint):
+    return np.sum((temperature_history - temperature_setpoint) ** 2)
 
 
-def mpc_inner(actuation_strategy, shoebox, T_setpoint, temperature_outside, prediction_horizon, control_horizon,
-              time_delta):
-    # shoebox_copy = copy.deepcopy(shoebox)
-    shoebox_copy = shoebox.copy()
-
-    # shoebox_copy = shoebox
-    # shoebox_copy = copy.copy(shoebox) # funny enough: shallow copy is slower here
-    T_history = np.empty(prediction_horizon + 1)
-    # T_history = np.empty(prediction_horizon)
-    # temperature_supply = actuation_strategy[0]
-
-    T_initial = shoebox_copy.get_operative_temperature()
-    T_history[0] = T_initial
-    T_predicted = T_initial
-
-    for k in range(control_horizon):
-        # T_predicted = model(T_predicted, u[k], a, b, T_out)
-        T_history[k + 1] = model(shoebox_copy, actuation_strategy[k], temperature_outside, time_delta=time_delta)
-    for k in range(control_horizon, prediction_horizon):
-        # T_history[k + 1] = model(shoebox_copy, actuation_strategy[-1], temperature_outside, time_delta=time_delta) # take last action
-        T_history[k + 1] = model(shoebox_copy, 0, temperature_outside, time_delta=time_delta)  # take action = 0
-
-    cost = cost_function(T_history, T_setpoint)
-    # return cost, T_history
-    return cost
-
-
-def mpc_inner_varstep(actuation_strategy, steps_per_actuation_sequence, shoebox, T_setpoint, temperature_outside,
-                      prediction_horizon, control_horizon, time_delta):
-    # shoebox_copy = copy.deepcopy(shoebox)
-    shoebox_copy = shoebox.copy()
-    T_history = np.empty(sum(steps_per_actuation_sequence) + 1)
-
-    T_initial = shoebox_copy.get_operative_temperature()
-    T_history[0] = T_initial
-    T_predicted = T_initial
-
-    # assemble step plan
-    step_plan = [[0, steps_per_actuation_sequence[0]]]
-    for stage in range(1, len(steps_per_actuation_sequence)):
-        step_plan.append([step_plan[-1][1], step_plan[-1][1] + steps_per_actuation_sequence[stage]])
-
-    for stage in range(len(steps_per_actuation_sequence)):
-        for k in range(step_plan[stage][0], step_plan[stage][1]):
-            T_history[k + 1] = model(shoebox_copy, actuation_strategy[stage],
-                                     time_delta=time_delta)
-
-    cost = cost_function(T_history, T_setpoint)
-    # return cost, T_history
-    return cost
+# def mpc_inner(actuation_strategy, shoebox, T_setpoint, temperature_outside, prediction_horizon, control_horizon,
+#               time_delta):
+#     # shoebox_copy = copy.deepcopy(shoebox)
+#     shoebox_copy = shoebox.copy()
+#
+#     # shoebox_copy = shoebox
+#     # shoebox_copy = copy.copy(shoebox) # funny enough: shallow copy is slower here
+#     T_history = np.empty(prediction_horizon + 1)
+#     # T_history = np.empty(prediction_horizon)
+#     # temperature_supply = actuation_strategy[0]
+#
+#     T_initial = shoebox_copy.get_operative_temperature()
+#     T_history[0] = T_initial
+#     T_predicted = T_initial
+#
+#     for k in range(control_horizon):
+#         # T_predicted = model(T_predicted, u[k], a, b, T_out)
+#         T_history[k + 1] = model(shoebox_copy, actuation_strategy[k], temperature_outside, time_delta=time_delta)
+#     for k in range(control_horizon, prediction_horizon):
+#         # T_history[k + 1] = model(shoebox_copy, actuation_strategy[-1], temperature_outside, time_delta=time_delta) # take last action
+#         T_history[k + 1] = model(shoebox_copy, 0, temperature_outside, time_delta=time_delta)  # take action = 0
+#
+#     cost = cost_function(T_history, T_setpoint)
+#     # return cost, T_history
+#     return cost
 
 
-def mpc_outer_old(num_timesteps, initial_control, steps_per_actuation_sequence, bounds, shoebox, T_setpoint,
-                  temperature_outside, prediction_horizon, control_horizon, delta_time):
-    optimal_control_actions = list()
-    start_time = time.time()
-    for i in range(num_timesteps):
-        if i % 50 == 0:
-            print("\r", end="")
-            print(f"timestep: {i}/{num_timesteps}, total time so far: {time.time() - start_time:.2f}", flush=True,
-                  end="")
-        # print(f"timestep", flush=True)
+# def mpc_inner_varstep(actuation_strategy, steps_per_actuation_sequence, shoebox, T_setpoint, temperature_outside,
+#                       time_delta):
+#     # shoebox_copy = copy.deepcopy(shoebox)
+#     shoebox_copy = shoebox.copy()
+#     T_history = np.empty(sum(steps_per_actuation_sequence) + 1)
+#
+#     T_initial = shoebox_copy.get_operative_temperature()
+#     T_history[0] = T_initial
+#     T_predicted = T_initial
+#
+#     # assemble step plan
+#     step_plan = [[0, steps_per_actuation_sequence[0]]]
+#     for stage in range(1, len(steps_per_actuation_sequence)):
+#         step_plan.append([step_plan[-1][1], step_plan[-1][1] + steps_per_actuation_sequence[stage]])
+#
+#     for stage in range(len(steps_per_actuation_sequence)):
+#         for k in range(step_plan[stage][0], step_plan[stage][1]):
+#             T_history[k + 1] = model(shoebox_copy, actuation_strategy[stage],
+#                                      time_delta=time_delta)
+#
+#     cost = cost_function(T_history, T_setpoint)
+#     # return cost, T_history
+#     return cost
 
-        result = minimize(mpc_inner_varstep, initial_control,  # method="Powell",
-                          args=(steps_per_actuation_sequence, shoebox, T_setpoint, temperature_outside,
-                                prediction_horizon, control_horizon, delta_time),
-                          bounds=bounds)
 
-        optimal_control_actions.append(result.x[0])
-        shoebox.time_step(optimal_control_actions[-1], delta_time)
-    print("")
+# def mpc_outer_old(num_timesteps, initial_control, steps_per_actuation_sequence, bounds, shoebox, T_setpoint,
+#                   temperature_outside, delta_time):
+#     optimal_control_actions = list()
+#     start_time = time.time()
+#     for i in range(num_timesteps):
+#         if i % 50 == 0:
+#             print("\r", end="")
+#             print(f"timestep: {i}/{num_timesteps}, total time so far: {time.time() - start_time:.2f}", flush=True,
+#                   end="")
+#         # print(f"timestep", flush=True)
+#
+#         result = minimize(mpc_inner_varstep, initial_control,  # method="Powell",
+#                           args=(steps_per_actuation_sequence, shoebox, T_setpoint, temperature_outside,
+#                                 delta_time),
+#                           bounds=bounds)
+#
+#         optimal_control_actions.append(result.x[0])
+#         shoebox.time_step(optimal_control_actions[-1], delta_time)
+#     print("")
+#
+#     return np.array(optimal_control_actions)
 
-    return np.array(optimal_control_actions)
-
-# TODO: implement prediction_horizon
-def mpc_inner_cost_wrapper(control_strategy, controlled_object:MPCControlledObject, control_steps, temperature_setpoint,
-                           prediction_horizon, simulation_step_size): #TODO: typehints, better function name, take cost function as input
+def mpc_objective(control_strategy, controlled_object: MPCControlledObject, control_steps, temperature_setpoint,
+                  prediction_horizon,
+                  simulation_step_size):  # TODO: typehints, take cost function as input 2
     controlled_object_copy = controlled_object.copy()
-    temperature_history = np.empty(sum(control_steps) + 1) # TODO: fix the +1 nonsense
-
-    temperature_initial = controlled_object_copy.get_operative_temperature() # TODO: this should be something like controlled_object_copy.get_state()
-    temperature_history[0] = temperature_initial
+    control_horizon = sum(control_steps)
 
     step_plan = [[0, control_steps[0]]]
     for stage in range(1, len(control_steps)):
         step_plan.append([step_plan[-1][1], step_plan[-1][1] + control_steps[stage]])
 
+    temperature_history = np.empty(prediction_horizon)
     for stage in range(len(control_steps)):
         for k in range(step_plan[stage][0], step_plan[stage][1]):
             controlled_object_copy.time_step(control_strategy[stage], delta_time=simulation_step_size)
-            temperature_history[k + 1] = controlled_object_copy.get_operative_temperature()
+            temperature_history[k] = controlled_object_copy.get_operative_temperature() # TODO: this should be something like controlled_object_copy.get_state()
 
-    cost = cost_function(temperature_history, temperature_setpoint) # TODO: cost_function should take state object instead of temperature
-    # TODO: cost function should not depend on number of steps but on total time
+    for i in range(control_horizon, prediction_horizon):
+        controlled_object_copy.time_step(control_strategy[-1], delta_time=simulation_step_size)
+        temperature_history[i] = controlled_object_copy.get_operative_temperature()
+
+    cost = cost_function(temperature_history,
+                         temperature_setpoint)  # TODO: cost_function should take state object instead of temperature
+    # TODO: cost function should not depend on number of steps but on total time (else smaller step leads to higher cost)
     return cost
 
-
-def mpc(controlled_object: MPCControlledObject,
-        initial_control: NDArray[np.float64],
-        total_time_steps: int,
-        control_steps: list[int],
-        temperature_setpoint: float,
-        prediction_horizon: int,
-        simulation_step_size: float,
-        mpc_inner_cost_wrapper_local,
-        bounds: list[tuple[float, float]]) -> NDArray[np.float64]:
-
+#todo: what happens, at the end of the simulation time? when there are no boundary conditions left?
+def simulate_mpc_controlled_object(controlled_object: MPCControlledObject,
+                                   initial_control: NDArray[np.float64],
+                                   total_time_steps: int,
+                                   control_steps: list[int],
+                                   temperature_setpoint: float,
+                                   prediction_horizon: int,
+                                   simulation_step_size: float,
+                                   mpc_objective_fn,
+                                   bounds: list[tuple[float, float]]) -> NDArray[np.float64]:
     final_control_sequence = np.empty(total_time_steps, dtype=np.float64)
     start_time = time.time()
     for i in range(total_time_steps):
@@ -227,19 +229,19 @@ def mpc(controlled_object: MPCControlledObject,
             print(f"timestep: {i}/{total_time_steps}, total time so far: {time.time() - start_time:.2f}", flush=True,
                   end="")
 
-
-        optimized_control_sequence = minimize(mpc_inner_cost_wrapper_local, initial_control,
+        optimized_control_sequence = minimize(mpc_objective_fn, initial_control,
                                               args=(controlled_object, control_steps, temperature_setpoint,
                                                     prediction_horizon, simulation_step_size),
                                               bounds=bounds)
 
         final_control_sequence[i] = optimized_control_sequence.x[0]
         controlled_object.time_step(final_control_sequence[i], simulation_step_size)
+    print("")
 
     return final_control_sequence
 
 
-def get_property_series(shoebox, actuation_strategy, temperature_outside):
+def get_property_series(shoebox, actuation_strategy, temperature_outside, delta_time):
     dim = len(actuation_strategy)
     temperature_storage = np.empty(dim + 1)
     temperature_air = np.empty(dim + 1)
@@ -253,9 +255,8 @@ def get_property_series(shoebox, actuation_strategy, temperature_outside):
 
     for k in range(dim):
         u = actuation_strategy[k]
-        te = temperature_outside[k]
         # shoebox.timestep(te, u)
-        shoebox.time_step(u)
+        shoebox.time_step(u, delta_time)
         temperature_storage[k + 1] = shoebox.temperature_storage
         temperature_air[k + 1] = shoebox.temperature_air
         temperature_operative[k + 1] = shoebox.get_operative_temperature()
@@ -267,9 +268,9 @@ def get_property_series(shoebox, actuation_strategy, temperature_outside):
             "temperature_supply": temperature_supply}
 
 
-def post_proc(shoebox, optimal_control_actions, num_timesteps, T_setpoint, temperature_outside):
+def post_proc(shoebox, optimal_control_actions, num_timesteps, T_setpoint, temperature_outside, delta_time):
     property_dict = get_property_series(shoebox, actuation_strategy=optimal_control_actions,
-                                        temperature_outside=temperature_outside)
+                                        temperature_outside=temperature_outside, delta_time=delta_time)
     # Plotting
     fig, ax1 = plt.subplots()
 
@@ -306,25 +307,17 @@ def main_script():
     shoebox = ShoeBox(bc_provider=bc_provider, lengths=lengths)
     temperature_outside = 7
     simulated_time = 8 * 3600
-    delta_time = 120
+    delta_time = 60
     num_timesteps = int(simulated_time / delta_time)
 
     # Initial conditions
-    temperature_setpoint = 19  # Desired room temperature
+    temperature_setpoint = 23
 
-    # for i in range(3):
-    # Prediction and control horizons
-    prediction_horizon = 100
-    control_horizon = 5
-
-    # steps_per_actuation_sequence = [1, 2, 4, 8, 16, 32, 60, 120, 240, 480]
-    # steps_per_actuation_sequence = [1, 2, 4, 8, 16, 32, 60, 120]
-    # steps_per_actuation_sequence = [1, 2, 4, 8]
-    control_steps = [1, 2, 4, 8, 16, 32]
+    control_steps = [1, 2, 4, 8, 16]
+    # control_steps = [1] * 5
+    prediction_horizon = 2 * sum(control_steps)
 
     # Constraints
-    # bounds = [(15, 35)] * control_horizon
-    # bounds = [(-1, 1)] * control_horizon
     bounds = [(-1., 1.)] * len(control_steps)
 
     # Initial control actions
@@ -332,41 +325,33 @@ def main_script():
 
     # Optimize control actions
     start_time = time.time()
-    optimal_control_actions = mpc_outer_old(num_timesteps, initial_control, control_steps,
-                                            bounds, shoebox, temperature_setpoint,
-                                            temperature_outside, prediction_horizon, control_horizon, delta_time)
 
-    # optimal_control_actions = mpc(controlled_object=shoebox,
-    #                               initial_control=initial_control,
-    #                               total_time_steps=num_timesteps,
-    #                               control_steps=control_steps,
-    #                               temperature_setpoint=temperature_setpoint,
-    #                               prediction_horizon=prediction_horizon,
-    #                               simulation_step_size=delta_time,
-    #                               mpc_inner_cost_wrapper_local=mpc_inner_cost_wrapper,
-    #                               bounds=bounds)
+    optimal_control_actions = simulate_mpc_controlled_object(controlled_object=shoebox,
+                                                             initial_control=initial_control,
+                                                             total_time_steps=num_timesteps,
+                                                             control_steps=control_steps,
+                                                             temperature_setpoint=temperature_setpoint,
+                                                             prediction_horizon=prediction_horizon,
+                                                             simulation_step_size=delta_time,
+                                                             mpc_objective_fn=mpc_objective,
+                                                             bounds=bounds)
 
     # Calculate the temperature history with optimal control actions
-
     shoebox_new = ShoeBox(bc_provider=bc_provider, lengths=lengths)
     temperature_outside_array = np.ones(num_timesteps + 1) * temperature_outside
     # optimal_control_actions = np.ones(optimal_control_actions.size) * 7
+
+
     result_dict = get_property_series(shoebox=shoebox_new, actuation_strategy=optimal_control_actions,
-                                      temperature_outside=temperature_outside_array)
-    T_history = result_dict["temperature_operative"]
-    # _, T_history = mpc(optimal_control_actions, shoebox, temperature_setpoint, temperature_outside,
-    #                    prediction_horizon, control_horizon)
+                                      temperature_outside=temperature_outside_array, delta_time=delta_time)
+    temperature_history = result_dict["temperature_operative"]
 
-    if False:
-        print("Optimal Control Actions:", optimal_control_actions)
-
-    print(f"Final cost function: {cost_function(T_history, temperature_setpoint):.8e}")
-
+    print(f"Final cost function: {cost_function(temperature_history, temperature_setpoint):.8e}")
     print(f"time taken: {time.time() - start_time:.2f} seconds")
 
     fresh_shoe_box = ShoeBox(bc_provider=bc_provider, lengths=lengths)
     post_proc(fresh_shoe_box, optimal_control_actions, num_timesteps, temperature_setpoint,
-              temperature_outside=np.full(num_timesteps, temperature_outside))
+              temperature_outside=np.full(num_timesteps, temperature_outside), delta_time=delta_time)
 
 
 if __name__ == "__main__":
