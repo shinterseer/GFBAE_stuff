@@ -21,7 +21,7 @@ class ConstantScalarBC(BoundaryConditionsProvider):
         return self.scalar
 
 
-#todo: think of a way to make this thing performant
+# todo: think of a way to make this thing performant
 class BCFromDF(BoundaryConditionsProvider):
     def __init__(self, df):
         # df = pd.read_csv(filename, index_col=0)
@@ -32,8 +32,8 @@ class BCFromDF(BoundaryConditionsProvider):
         self.data = df
 
     def get(self, mytime: float) -> float:
-        value = np.interp(mytime, self.data.index.values, np.array(self.data.values.T[0])) # todo: fix this ugliness
-        return value # todo: fix this warning
+        value = np.interp(mytime, self.data.index.values, np.array(self.data.values.T[0]))  # todo: fix this ugliness
+        return value  # todo: fix this warning
 
 
 class MPCControlledObject(ABC):
@@ -47,18 +47,6 @@ class MPCControlledObject(ABC):
     @abstractmethod
     def copy(self):
         pass
-
-    # def __copy__(self):
-    #     raise RuntimeError(
-    #         "MPCControlledObject must not be copied via copy.copy(). "
-    #         "Use instance.copy() instead."
-    #     )
-    #
-    # def __deepcopy__(self, memo):
-    #     raise RuntimeError(
-    #         "MPCControlledObject must not be deep-copied. "
-    #         "Use instance.copy() instead."
-    #     )
 
 
 class ShoeBox(MPCControlledObject):
@@ -202,7 +190,8 @@ def cost_function(temperature_history, temperature_setpoint):
 #
 #     return np.array(optimal_control_actions)
 
-def mpc_objective(control_strategy, controlled_object: MPCControlledObject, mytime0, control_steps, temperature_setpoint,
+def mpc_objective(control_strategy, controlled_object: MPCControlledObject, mytime0, control_steps,
+                  temperature_setpoint,
                   prediction_horizon, simulation_step_size):  # TODO: typehints, take cost function as input
     controlled_object_copy = controlled_object.copy()
     control_horizon = sum(control_steps)
@@ -216,7 +205,8 @@ def mpc_objective(control_strategy, controlled_object: MPCControlledObject, myti
     for stage in range(len(control_steps)):
         for k in range(step_plan[stage][0], step_plan[stage][1]):
             controlled_object_copy.time_step(mytime, control_strategy[stage], delta_time=simulation_step_size)
-            temperature_history[k] = controlled_object_copy.get_operative_temperature() # TODO: this should be something like controlled_object_copy.get_state()
+            temperature_history[
+                k] = controlled_object_copy.get_operative_temperature()  # TODO: this should be something like controlled_object_copy.get_state()
             mytime += simulation_step_size
 
     for i in range(control_horizon, prediction_horizon):
@@ -226,10 +216,10 @@ def mpc_objective(control_strategy, controlled_object: MPCControlledObject, myti
 
     cost = cost_function(temperature_history,
                          temperature_setpoint)  # TODO: cost_function should take state object instead of temperature
-    # TODO: cost function should not depend on number of steps but on total time (else smaller step leads to higher cost)
     return cost
 
-#todo: what happens, at the end of the simulation time? when there are no boundary conditions left?
+
+# todo: what happens, at the end of the simulation time? when there are no boundary conditions left?
 def simulate_mpc_controlled_object(controlled_object: MPCControlledObject,
                                    initial_control: NDArray[np.float64],
                                    total_time_steps: int,
@@ -322,7 +312,6 @@ def post_proc(shoebox, optimal_control_actions, num_timesteps, temperature_setpo
 
 
 def main_script():
-
     simulated_time = 8 * 3600.
     delta_time = 60.
     num_timesteps = int(simulated_time / delta_time)
@@ -335,7 +324,6 @@ def main_script():
     temperatures = np.array([7., 7., -10.])
     df_bc = pd.DataFrame({'temperature': temperatures}, index=times)
     bc_provider = BCFromDF(df_bc)
-
 
     # Model parameters
     lengths = (5., 5., 5.)
@@ -381,7 +369,7 @@ def main_script():
     print(f"time taken: {time.time() - start_time:.2f} seconds")
 
     # fresh_shoe_box = ShoeBox(bc_provider=bc_provider, lengths=lengths)
-    fresh_shoe_box = shoebox_initial.copy() # todo: find out why this is needed
+    fresh_shoe_box = shoebox_initial.copy()  # todo: find out why this is needed
 
     post_proc(fresh_shoe_box, optimal_control_actions, num_timesteps, temperature_setpoint,
               delta_time=delta_time)

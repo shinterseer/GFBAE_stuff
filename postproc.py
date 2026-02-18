@@ -14,6 +14,10 @@ def set_style(font_size=16, font_family='Times New Roman', usetex=True):
     plt.rcParams['text.usetex'] = usetex
 
 
+def gsi(weight, power):
+    return (weight * power).sum() / abs(power).sum()
+
+
 def array_to_time_series(array, step_in_minutes=1, start_time="2025-04-29 00:00"):
     array = np.array(array)
     step = pd.Timedelta(minutes=step_in_minutes)
@@ -260,3 +264,62 @@ def quickplot(myarray):
     plt.plot(myarray)
     plt.grid()
     plt.show(block=True)
+
+
+def gfi_examples_plot():
+
+    set_style(usetex=False)
+
+    df_load = pd.DataFrame(shoebox_gf.get_consumption_weight_curve(5))
+    peak_idx = df_load.idxmax()
+    load_col = df_load.columns[0]
+    peak_value = df_load[load_col].max()
+    df_load = df_load / peak_value
+
+    peak_load = 1000
+    df_load['gsi1'] = np.zeros(len(df_load.index))
+    df_load.loc[peak_idx, 'gsi1'] = peak_load
+    df_load['gsi2'] = np.zeros(len(df_load.index))
+    df_load.loc[peak_idx, 'gsi2'] = -peak_load
+    df_load['gsi3'] = df_load['Haushalt_Winter'] * peak_load / 2.
+    df_load['gsi4'] = -df_load['Haushalt_Winter'] * peak_load / 2.
+    fig, ax_prim = plt.subplots()
+    # Control actions plot
+    ax_secund = ax_prim.twinx()
+
+    # Temperature plot
+    ax_secund.set_ylabel('Weighting Function')
+    # axes_object.tick_params(axis='y')
+    ax_prim.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    line1, = ax_secund.plot(df_load['Haushalt_Winter'], color='black', linestyle='-', label='$w$')
+    ax_prim.tick_params(axis='x', labelrotation=45)
+
+    # compute GSI
+    gsi1 = gsi(df_load[load_col], df_load['gsi1'])
+    gsi2 = gsi(df_load[load_col], df_load['gsi2'])
+    gsi3 = gsi(df_load[load_col], df_load['gsi3'])
+    gsi4 = gsi(df_load[load_col], df_load['gsi4'])
+
+    line_gsi1, = ax_prim.plot(df_load['gsi1'], color='red', linestyle='-', label=f'$p$ with $GSI = {gsi1:.1f}$')
+    line_gsi2, = ax_prim.plot(df_load['gsi2'], color='blue', linestyle='-', label=f'$p$ with $GSI = {gsi2:.1f}$')
+    line_gsi3, = ax_prim.plot(df_load['gsi3'], color='orange', linestyle='-', label=f'$p$ with $GSI = {gsi3:.1f}$')
+    line_gsi4, = ax_prim.plot(df_load['gsi4'], color='navy', linestyle='-', label=f'$p$ with $GSI = {gsi4:.1f}$')
+
+    ax_prim.set_ylabel('Power Exchange with the Grid in W')
+
+    # Adding legends
+    lines = [line1, line_gsi1, line_gsi2, line_gsi3, line_gsi4]
+    labels = [line.get_label() for line in lines]
+    ax_secund.legend(lines, labels, loc='upper left')
+    ax_secund.grid()
+    plt.tight_layout()
+
+    plt.show(block=True)
+
+
+def main():
+    gfi_examples_plot()
+
+
+if __name__ == '__main__':
+    main()

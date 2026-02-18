@@ -135,6 +135,7 @@ class ShoeBox:
                 # change temperatures
                 heating_to_storage = heating_power * (1. - convective_portion_local)
                 heating_to_air = heating_power * convective_portion_local
+                # ventilation to air = ventilation_rate * volume * dT * constant * heat_recovery_factor
                 storage_to_outside = thermal_transmittance_local * (
                         temperature_air_local - temperature_outside_series[global_index])
                 Rsi = 0.13  # in m2K/W
@@ -417,7 +418,7 @@ def plot_script(results_file):
     d_ins = [ins_list[5], ins_list[17], ins_list[-1]]
 
     pp.set_style(font_size=18, font_family='Times New Roman', usetex=True)
-    pp.compare_2runs(data, {'insulation_thickness': (d_ins[1], d_ins[2]), 'storage_thickness': (d_sto, d_sto)}, y_lim=(0, 2000))
+    # pp.compare_2runs(data, {'insulation_thickness': (d_ins[1], d_ins[2]), 'storage_thickness': (d_sto, d_sto)}, y_lim=(0, 2000))
 
     pp.pp_from_file(data, y_idx=14)
     # pp.pp_from_file(data)
@@ -433,12 +434,13 @@ def main_script():
     # fn_global = '20251021_results30.pkl'
     num_vals = 10
     fn_global = 'dummy_results10.pkl'
-    simulation_script(outfile_name=None, num_vals=num_vals, num_processes=15)
+    # simulation_script(outfile_name=None, num_vals=num_vals, num_processes=15)
 
-    results_file = '20250915_results30.pkl'
-    # results_file = '20251021_results30.pkl'
+    # results_file = '20250915_results30.pkl'
+    results_file = '20251021_results30.pkl'
     # results_file = 'dummy_results10.pkl'
-    # plot_script(results_file=results_file)
+    plot_script(results_file=results_file)
+
 
 if __name__ == "__main__":
     main_script()
