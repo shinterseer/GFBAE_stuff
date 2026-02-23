@@ -244,7 +244,8 @@ def get_consumption_weight_curve(resample_in_minutes, filename="Lastprofile VDEW
     return load_curve / peak
 
 
-def get_ninja_pv(power_peak=1, input_file='ninja_pv_48.2084_16.3725_uncorrected.csv', resample_in_minutes=15):
+def get_ninja_pv(start_time='2015-01-01 01:00', end_time='2015-12-31 23:59', power_peak=1, resample_in_min=15,
+                 input_file='ninja_pv_48.2084_16.3725_uncorrected.csv', shift=1):
     """
     this is just a quick-and-dirty assumption of pv power. source: https://www.renewables.ninja/
     makes the following assumptions:
@@ -255,10 +256,21 @@ def get_ninja_pv(power_peak=1, input_file='ninja_pv_48.2084_16.3725_uncorrected.
     """
     df = pd.read_csv(input_file, skiprows=3, index_col=0)
     df.index = pd.to_datetime(df.index)
-    # df.resample(f"{resample_in_minutes}min").interpolate("time")
-    # df.resample(f"{resample_in_minutes}min").interpolate()
-    df.resample("1min").interpolate()
-    return df['electricity'] * power_peak
+    series = df['electricity']
+    series = series.shift(shift)
+    # df = df.resample(f"{resample_in_min}min").interpolate()
+    # df = df.loc[start_time:end_time]
+    series = series.resample(f"{resample_in_min}min").interpolate()
+    series = series.loc[start_time:end_time]
+
+    # return df['electricity'] * power_peak
+    return series * power_peak
+
+
+def get_penalty_dict():
+    return {'comfort_penalty_weight': 1.e7,
+            'control_penalty_weight': 1.e6
+            }
 
 
 def get_basic_parameters():
@@ -341,8 +353,9 @@ def simulation_script(outfile_name, num_vals=20, num_processes=8):
     storage_thickness_array = np.linspace(0.01, 0.05, num_vals)
     insulation_thickness_array = np.linspace(0.05, 0.3, num_vals)
 
-    comfort_penalty_weight = 1.e7
-    control_penalty_weight = 1.e6
+    penalty_dict = get_penalty_dict()
+    comfort_penalty_weight = penalty_dict["comfort_penalty_weight"]
+    control_penalty_weight = penalty_dict["control_penalty_weight"]
 
     # shoebox_init = copy.deepcopy(shoebox)
     results_list = list()
@@ -424,7 +437,82 @@ def plot_script(results_file):
     # pp.pp_from_file(data)
 
 
+def pv_scenario_script(pv_amount=1.2, hp_cop=3):
+    # get load with pv
+    load1 = get_consumption_weight_curve(resample_in_minutes=1)
+    pv_series = get_ninja_pv(start_time='2015-03-03 00:00', end_time='2015-03-03 23:59')
+    pv_series.index = pv_series.index + pd.DateOffset(years=-115, months=-2, days=-2)
+    series_result = load1 - pv_amount * pv_series
+
+    if True:
+        plt.plot(load1, label='load1')
+        plt.plot(pv_series, label='pv_series')
+        plt.plot(series_result, label='series_result')
+        plt.show(block=True)
+
+    # prepare heating strategy optimization
+    penalty_dict = get_penalty_dict()
+    comfort_penalty_weight = penalty_dict["comfort_penalty_weight"]
+    control_penalty_weight = penalty_dict["control_penalty_weight"]
+
+    basic_parameter_dict = get_basic_parameters()
+    temperature_outside_series = basic_parameter_dict["temperature_outside_series"]
+    time_delta = basic_parameter_dict["time_delta"]
+    power_weight_curve_default = basic_parameter_dict["power_weight_curve"]
+    power_weight_curve_pv = series_result
+
+    temperature_min = basic_parameter_dict["temperature_min"]
+    temperature_max = basic_parameter_dict["temperature_max"]
+    substeps_per_actuation = basic_parameter_dict["substeps_per_actuation"]
+
+    shoebox_parameters = {'length1': 5., 'length2': 5., 'length3': 5., 'heat_max': 6000.,
+                          'storage_thickness': 0.03,
+                          'temp_init': 20., 'convective_portion': 0.3,
+                          'insulation_thickness': 0.18}
+    simulation_parameters = {'temperature_outside_series': temperature_outside_series,
+                             'time_delta': time_delta, 'power_weight_curve': power_weight_curve_default,
+                             'temperature_min': temperature_min, 'temperature_max': temperature_max,
+                             'substeps_per_actuation': substeps_per_actuation,
+                             'comfort_penalty_weight': comfort_penalty_weight,
+                             'control_penalty_weight': control_penalty_weight}
+
+    parameter_dict = {'shoebox_parameters': shoebox_parameters, 'simulation_parameters': simulation_parameters}
+    result_default = multiproc_wrapper(parameter_dict)
+    simulation_parameters['power_weight_curve'] = power_weight_curve_pv
+    result_pv = multiproc_wrapper(parameter_dict)
+
+    if True:
+        plt.plot(result_default['actuation_sequence'], label='default')
+        plt.plot(result_pv['actuation_sequence'], label='pv')
+        plt.show(block=True)
+
+    # get load curves and gsi values
+    pv_sizes = np.linspace(0.5, 2, 31)
+    load_curves_default = list()
+    gsi_default = list()
+    load_curves_pv = list()
+    gsi_pv = list()
+    for pv_size in pv_sizes:
+        load_default = np.repeat(result_default['actuation_sequence'], 4) / hp_cop - pv_size * pv_series
+        load_pv = np.repeat(result_pv['actuation_sequence'], 4) / hp_cop - pv_size * pv_series
+        load_curves_default.append(load_default)
+        load_curves_pv.append(load_pv)
+        gsi_default.append(pp.gsi(weight=power_weight_curve_default, power=load_default))
+        gsi_pv.append(pp.gsi(weight=power_weight_curve_pv, power=load_pv))
+
+    if True:
+        plt.plot(gsi_default, label='gsi_default')
+        plt.plot(gsi_pv, label='gsi_pv')
+        plt.show(block=True)
+
+
+
+    x=0
+    pass
+
+
 def main_script():
+    pv_scenario_script()
     # pv_series = get_ninja_pv()
     # plt.plot(pv_series)
     # plt.grid()
@@ -439,7 +527,7 @@ def main_script():
     # results_file = '20250915_results30.pkl'
     results_file = '20251021_results30.pkl'
     # results_file = 'dummy_results10.pkl'
-    plot_script(results_file=results_file)
+    # plot_script(results_file=results_file)
 
 
 if __name__ == "__main__":

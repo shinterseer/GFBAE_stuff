@@ -276,7 +276,7 @@ def gfi_examples_plot():
     peak_value = df_load[load_col].max()
     df_load = df_load / peak_value
 
-    peak_load = 1000
+    peak_load = 1000.
     df_load['gsi1'] = np.zeros(len(df_load.index))
     df_load.loc[peak_idx, 'gsi1'] = peak_load
     df_load['gsi2'] = np.zeros(len(df_load.index))
@@ -291,7 +291,8 @@ def gfi_examples_plot():
     ax_secund.set_ylabel('Weighting Function')
     # axes_object.tick_params(axis='y')
     ax_prim.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    line1, = ax_secund.plot(df_load['Haushalt_Winter'], color='black', linestyle='-', label='$w$')
+    # line1, = ax_secund.plot(df_load['Haushalt_Winter'], color='black', linestyle='-', label='$w$')
+    line1, = ax_secund.plot(df_load['Haushalt_Winter'], color='black', linewidth=2, linestyle='-', label='$w$')
     ax_prim.tick_params(axis='x', labelrotation=45)
 
     # compute GSI
@@ -310,6 +311,7 @@ def gfi_examples_plot():
     # Adding legends
     lines = [line1, line_gsi1, line_gsi2, line_gsi3, line_gsi4]
     labels = [line.get_label() for line in lines]
+    ax_secund.set_ylim([-0.05, 1.05])
     ax_secund.legend(lines, labels, loc='upper left')
     ax_secund.grid()
     plt.tight_layout()
