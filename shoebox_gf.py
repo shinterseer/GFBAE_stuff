@@ -440,14 +440,15 @@ def plot_script(results_file):
 def pv_scenario_script(pv_amount=1.2, hp_cop=3):
     # get load with pv
     load1 = get_consumption_weight_curve(resample_in_minutes=1)
-    pv_series = get_ninja_pv(start_time='2015-03-03 00:00', end_time='2015-03-03 23:59')
+    pv_series = get_ninja_pv(start_time='2015-03-03 00:00', end_time='2015-03-03 23:59', resample_in_min=1)
     pv_series.index = pv_series.index + pd.DateOffset(years=-115, months=-2, days=-2)
-    series_result = load1 - pv_amount * pv_series
+    load1_pv = load1 - pv_amount * pv_series
 
-    if True:
+    if False:
         plt.plot(load1, label='load1')
         plt.plot(pv_series, label='pv_series')
-        plt.plot(series_result, label='series_result')
+        plt.plot(load1_pv, label='load1_pv', color='red')
+        plt.legend()
         plt.show(block=True)
 
     # prepare heating strategy optimization
@@ -459,7 +460,7 @@ def pv_scenario_script(pv_amount=1.2, hp_cop=3):
     temperature_outside_series = basic_parameter_dict["temperature_outside_series"]
     time_delta = basic_parameter_dict["time_delta"]
     power_weight_curve_default = basic_parameter_dict["power_weight_curve"]
-    power_weight_curve_pv = series_result
+    power_weight_curve_pv = load1_pv
 
     temperature_min = basic_parameter_dict["temperature_min"]
     temperature_max = basic_parameter_dict["temperature_max"]
@@ -482,33 +483,41 @@ def pv_scenario_script(pv_amount=1.2, hp_cop=3):
     result_pv = multiproc_wrapper(parameter_dict)
 
     if True:
-        plt.plot(result_default['actuation_sequence'], label='default')
-        plt.plot(result_pv['actuation_sequence'], label='pv')
+        x=0
+
+        fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(12, 4))
+        dfa = pd.DataFrame(load1)
+        dfa['heating_strategy'] = np.repeat(result_default['actuation_sequence'], 60)
+        axs[0].plot(dfa['heating_strategy'], label='Heating power in W', color='orange')
+        ax0_dual = axs[0].twinx()
+        ax0_dual.plot(load1, label='Weighting function', color='C0')
+        ax0_dual.set_ylim(-0.25, 1.05)
+
+        dfb = pd.DataFrame(load1_pv)
+        dfb['heating_strategy'] = np.repeat(result_pv['actuation_sequence'], 60)
+        axs[1].plot(dfb['heating_strategy'], label='Heating power in W', color='orange')
+        ax1_dual = axs[1].twinx()
+        ax1_dual.plot(load1_pv, label='Weighting function', color='C0')
+        ax1_dual.set_ylim(-0.25, 1.05)
+
+        axs[0].legend()
+        axs[0].grid(True)
+        axs[1].legend()
+        axs[1].grid(True)
         plt.show(block=True)
 
     # get load curves and gsi values
-    pv_sizes = np.linspace(0.5, 2, 31)
-    load_curves_default = list()
-    gsi_default = list()
-    load_curves_pv = list()
-    gsi_pv = list()
-    for pv_size in pv_sizes:
-        load_default = np.repeat(result_default['actuation_sequence'], 4) / hp_cop - pv_size * pv_series
-        load_pv = np.repeat(result_pv['actuation_sequence'], 4) / hp_cop - pv_size * pv_series
-        load_curves_default.append(load_default)
-        load_curves_pv.append(load_pv)
-        gsi_default.append(pp.gsi(weight=power_weight_curve_default, power=load_default))
-        gsi_pv.append(pp.gsi(weight=power_weight_curve_pv, power=load_pv))
-
-    if True:
-        plt.plot(gsi_default, label='gsi_default')
-        plt.plot(gsi_pv, label='gsi_pv')
-        plt.show(block=True)
-
-
-
-    x=0
-    pass
+    pv_sizes = np.linspace(0, 2000, 41)
+    load_curves_default = [np.repeat(result_default['actuation_sequence'], 60) / hp_cop - pv_size * pv_series
+                           for pv_size in pv_sizes]
+    gsi_default = [pp.gsi(weight=power_weight_curve_default, power=load_default)
+                   for load_default in load_curves_default]
+    load_curves_pv = [np.repeat(result_pv['actuation_sequence'], 60) / hp_cop - pv_size * pv_series
+                           for pv_size in pv_sizes]
+    gsi_pv = [pp.gsi(weight=power_weight_curve_pv, power=load_default)
+                   for load_default in load_curves_pv]
+    # plot
+    pp.isec_plot_gsi_scenarios(pv_sizes, gsi_default, gsi_pv)
 
 
 def main_script():

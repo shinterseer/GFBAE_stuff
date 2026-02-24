@@ -319,6 +319,19 @@ def gfi_examples_plot():
     plt.show(block=True)
 
 
+def isec_plot_gsi_scenarios(pv_sizes, gsi_default, gsi_pv):
+    set_style()
+    fix, axes_object = plt.subplots()
+
+    axes_object.plot(pv_sizes, gsi_default, label='Scenario A: Residential only')
+    axes_object.plot(pv_sizes, gsi_pv, label='Scenario B: Residential with PV')
+    axes_object.set_ylabel('GSI')
+    axes_object.set_xlabel('PV system power in $\mathrm{kW}_{\mathrm{p}}$')
+    axes_object.grid(True)
+    axes_object.legend()
+    plt.tight_layout()
+    plt.show(block=True)
+
 def main():
     gfi_examples_plot()
 
