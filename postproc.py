@@ -332,6 +332,52 @@ def isec_plot_gsi_scenarios(pv_sizes, gsi_default, gsi_pv):
     plt.tight_layout()
     plt.show(block=True)
 
+
+def isec_plot_scenarios_heating_strat(load1, load1_pv, result_default, result_pv):
+    set_style()
+
+    fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(12, 4))
+    axs[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    axs[0].tick_params(axis='x', labelrotation=45)
+    axs[1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    axs[1].tick_params(axis='x', labelrotation=45)
+
+    dfa = pd.DataFrame(load1)
+    dfa['heating_strategy'] = np.repeat(result_default['actuation_sequence'], 60)
+    line01, = axs[0].plot(dfa['heating_strategy'], label='Heating strategy', color='orange')
+    axs[0].set_ylabel('Heating power in W')
+    ax0_dual = axs[0].twinx()
+    ax0_dual.set_ylabel('Weighting function')
+    line02, = ax0_dual.plot(load1, label='Weighting function', color='C0')
+    ax0_dual.set_ylim(-0.25, 1.05)
+    axs[0].set_ylim(-100, 4500)
+
+    # Adding legends
+    lines0 = [line01, line02]
+    labels0 = [line.get_label() for line in lines0]
+    axs[0].legend(lines0, labels0, loc='upper left')
+
+    dfb = pd.DataFrame(load1_pv)
+    dfb['heating_strategy'] = np.repeat(result_pv['actuation_sequence'], 60)
+    line11, = axs[1].plot(dfb['heating_strategy'], label='Heating strategy', color='orange')
+    axs[1].set_ylabel('Heating power in W')
+    ax1_dual = axs[1].twinx()
+    ax1_dual.set_ylabel('Weighting function')
+    line12, = ax1_dual.plot(load1_pv, label='Weighting function', color='C0')
+    ax1_dual.set_ylim(-0.25, 1.05)
+    axs[1].set_ylim(-100, 4500)
+
+    # Adding legends
+    lines1 = [line11, line12]
+    labels1 = [line.get_label() for line in lines1]
+    axs[1].legend(lines1, labels1, loc='upper left')
+
+    axs[0].grid(True)
+    axs[1].grid(True)
+    plt.tight_layout()
+    plt.show(block=True)
+
+
 def main():
     gfi_examples_plot()
 

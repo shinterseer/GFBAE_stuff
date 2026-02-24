@@ -481,30 +481,8 @@ def pv_scenario_script(pv_amount=1.2, hp_cop=3):
     result_default = multiproc_wrapper(parameter_dict)
     simulation_parameters['power_weight_curve'] = power_weight_curve_pv
     result_pv = multiproc_wrapper(parameter_dict)
-
-    if True:
-        x=0
-
-        fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(12, 4))
-        dfa = pd.DataFrame(load1)
-        dfa['heating_strategy'] = np.repeat(result_default['actuation_sequence'], 60)
-        axs[0].plot(dfa['heating_strategy'], label='Heating power in W', color='orange')
-        ax0_dual = axs[0].twinx()
-        ax0_dual.plot(load1, label='Weighting function', color='C0')
-        ax0_dual.set_ylim(-0.25, 1.05)
-
-        dfb = pd.DataFrame(load1_pv)
-        dfb['heating_strategy'] = np.repeat(result_pv['actuation_sequence'], 60)
-        axs[1].plot(dfb['heating_strategy'], label='Heating power in W', color='orange')
-        ax1_dual = axs[1].twinx()
-        ax1_dual.plot(load1_pv, label='Weighting function', color='C0')
-        ax1_dual.set_ylim(-0.25, 1.05)
-
-        axs[0].legend()
-        axs[0].grid(True)
-        axs[1].legend()
-        axs[1].grid(True)
-        plt.show(block=True)
+    # plot
+    pp.isec_plot_scenarios_heating_strat(load1, load1_pv, result_default, result_pv)
 
     # get load curves and gsi values
     pv_sizes = np.linspace(0, 2000, 41)
