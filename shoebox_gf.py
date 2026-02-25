@@ -438,6 +438,7 @@ def plot_script(results_file):
 
 
 def pv_scenario_script(pv_amount=1.2, hp_cop=3):
+
     # get load with pv
     load1 = get_consumption_weight_curve(resample_in_minutes=1)
     pv_series = get_ninja_pv(start_time='2015-03-03 00:00', end_time='2015-03-03 23:59', resample_in_min=1)
@@ -476,8 +477,25 @@ def pv_scenario_script(pv_amount=1.2, hp_cop=3):
     result_default = multiproc_wrapper(parameter_dict)
     simulation_parameters['power_weight_curve'] = power_weight_curve_pv
     result_pv = multiproc_wrapper(parameter_dict)
+
+    # get temperatures
+    shoebox_copy = ShoeBox(**shoebox_parameters)
+    result_dict_pv = model(shoebox_copy,
+                           heating_strategy=result_pv['actuation_sequence'],
+                           temperature_outside_series=simulation_parameters['temperature_outside_series'],
+                           time_delta=simulation_parameters['time_delta'],
+                           substeps_per_actuation=simulation_parameters['substeps_per_actuation'])
+    shoebox_copy = ShoeBox(**shoebox_parameters)
+    result_dict_default = model(shoebox_copy,
+                                heating_strategy=result_default['actuation_sequence'],
+                                temperature_outside_series=simulation_parameters['temperature_outside_series'],
+                                time_delta=simulation_parameters['time_delta'],
+                                substeps_per_actuation=simulation_parameters['substeps_per_actuation'])
+
     # plot
-    pp.isec_plot_scenarios_heating_strat(load1, load1_pv, result_default, result_pv)
+    pp.isec_plot_scenarios_heating_strat(load1, load1_pv, result_default, result_pv,
+                                         temperature_default=result_dict_default['temperature_operative_series'],
+                                         temperature_pv=result_dict_pv['temperature_operative_series'])
 
     # get load curves and gsi values
     pv_sizes = np.linspace(0, 2000, 41)
