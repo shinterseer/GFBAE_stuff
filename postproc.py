@@ -7,11 +7,78 @@ import numpy as np
 import shoebox_gf
 
 
-def set_style(font_size=16, font_family='Times New Roman', usetex=True):
-    # some font families: 'DejaVu Sans', 'Arial', 'serif', etc.
-    plt.rcParams['font.size'] = font_size           # Global font size
-    plt.rcParams['font.family'] = font_family
-    plt.rcParams['text.usetex'] = usetex
+# def set_style(font_size=16, font_family='Computer Modern Serif', usetex=True):
+#     # some font families: 'DejaVu Sans', 'Arial', 'serif', etc.
+#     plt.rcParams['font.size'] = font_size           # Global font size
+#     plt.rcParams['font.family'] = font_family
+#     plt.rcParams['text.usetex'] = usetex
+#
+#     # plt.rcParams['text.latex.preamble'] = r'''
+#     #     \usepackage{fontspec}
+#     #     \usepackage{xeCJK}
+#     #     \setmainfont{Arial}
+#     #     \usepackage{unicode-math}
+#     #     \setmathfont{Arial}
+#     # '''
+
+
+import matplotlib as mpl
+
+
+def set_style(font_size=16,
+              # font_family="Computer Modern Serif",
+              font_family="Arial",
+              usetex=False):
+
+    # --- basic settings ---
+    mpl.rcParams.update({
+        "font.size": font_size,
+        "text.usetex": usetex,
+    })
+
+    # ==========================================================
+    # CASE 1 — NO LATEX (simplest + most robust)
+    # ==========================================================
+    if not usetex:
+        mpl.rcParams.update({
+            "font.family": font_family,
+            "mathtext.fontset": "dejavusans",  # math matches sans fonts better
+        })
+        return
+
+    # ==========================================================
+    # CASE 2 — LATEX ENABLED
+    # ==========================================================
+    preamble = []
+
+    # ---- Arial / sans-serif journals ----
+    if font_family.lower() in ["arial", "sans-serif", "sans serif"]:
+        mpl.rcParams["font.family"] = "sans-serif"
+        mpl.rcParams["font.sans-serif"] = ["Arial"]
+
+        # Helvetica ≈ Arial (pdflatex-compatible)
+        preamble += [
+            r"\usepackage{helvet}",
+            r"\renewcommand{\familydefault}{\sfdefault}",
+        ]
+
+    # ---- Computer Modern (default LaTeX look) ----
+    elif font_family.lower() in [
+        "computer modern",
+        "computer modern serif",
+        "serif",
+    ]:
+        mpl.rcParams["font.family"] = "serif"
+        preamble += [
+            r"\usepackage{lmodern}",
+        ]
+
+    # ---- fallback: let LaTeX decide ----
+    else:
+        mpl.rcParams["font.family"] = "serif"
+
+    mpl.rcParams["text.latex.preamble"] = "\n".join(preamble)
+
 
 
 def gsi(weight, power):
@@ -316,6 +383,21 @@ def gfi_examples_plot():
     ax_secund.grid()
     plt.tight_layout()
 
+    plt.show(block=True)
+
+
+def isec_plot_resulting_load(load1, pv_series, load1_pv):
+    set_style()
+    plt.plot(load1, label='Residential load')
+    plt.plot(pv_series, label='PV production')
+    plt.plot(load1_pv, label='Resulting load', color='black')
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    plt.xticks(rotation=45)
+    plt.ylabel('Weighting function', fontstyle='italic')
+    plt.ylim(top=1.31)
+    plt.grid(True)
+    plt.legend(prop={'style': 'italic'})
+    plt.tight_layout()
     plt.show(block=True)
 
 

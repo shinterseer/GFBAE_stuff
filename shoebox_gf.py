@@ -443,13 +443,8 @@ def pv_scenario_script(pv_amount=1.2, hp_cop=3):
     pv_series = get_ninja_pv(start_time='2015-03-03 00:00', end_time='2015-03-03 23:59', resample_in_min=1)
     pv_series.index = pv_series.index + pd.DateOffset(years=-115, months=-2, days=-2)
     load1_pv = load1 - pv_amount * pv_series
-
-    if False:
-        plt.plot(load1, label='load1')
-        plt.plot(pv_series, label='pv_series')
-        plt.plot(load1_pv, label='load1_pv', color='red')
-        plt.legend()
-        plt.show(block=True)
+    # plot
+    pp.isec_plot_resulting_load(load1, pv_amount * pv_series, load1_pv)
 
     # prepare heating strategy optimization
     penalty_dict = get_penalty_dict()
@@ -491,9 +486,9 @@ def pv_scenario_script(pv_amount=1.2, hp_cop=3):
     gsi_default = [pp.gsi(weight=power_weight_curve_default, power=load_default)
                    for load_default in load_curves_default]
     load_curves_pv = [np.repeat(result_pv['actuation_sequence'], 60) / hp_cop - pv_size * pv_series
-                           for pv_size in pv_sizes]
+                      for pv_size in pv_sizes]
     gsi_pv = [pp.gsi(weight=power_weight_curve_pv, power=load_default)
-                   for load_default in load_curves_pv]
+              for load_default in load_curves_pv]
     # plot
     pp.isec_plot_gsi_scenarios(pv_sizes, gsi_default, gsi_pv)
 
