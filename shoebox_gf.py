@@ -12,7 +12,7 @@ from multiprocessing import Pool
 
 from numba import float64
 from numba.experimental import jitclass
-from numba import njit
+# from numba import njit
 
 import pso
 import postproc as pp

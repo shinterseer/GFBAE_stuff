@@ -388,9 +388,9 @@ def gfi_examples_plot():
 
 def isec_plot_resulting_load(load1, pv_series, load1_pv):
     set_style()
-    plt.plot(load1, label='Residential load')
+    plt.plot(load1, label='Scenario A: Residential load')
     plt.plot(pv_series, label='PV production')
-    plt.plot(load1_pv, label='Resulting load', color='black')
+    plt.plot(load1_pv, label='Scenario B: Residential + PV', color='black')
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     plt.xticks(rotation=45)
     plt.ylabel('Weighting function', fontstyle='italic')
@@ -429,37 +429,38 @@ def isec_plot_scenarios_heating_strat(load1, load1_pv, result_default, result_pv
     dfa['heating_strategy'] = np.repeat(result_default['actuation_sequence'], 60)
     dfa['temperature_operative'] = temperature_default
 
-    line01, = axs[0].plot(dfa['heating_strategy'], label='Heating strategy', color='orange')
-    axs[0].set_ylabel('Heating power in W', fontstyle='italic')
+    line01, = axs[0].plot(dfa['heating_strategy']/dfa['heating_strategy'].max(), label='Heating', color='orange')
+    axs[0].set_ylabel('Heating (norm.) and weighting function', fontstyle='italic')
     ax0_dual = axs[0].twinx()
-    ax0_dual.set_ylabel('Weighting function', fontstyle='italic')
-    # line02, = ax0_dual.plot(load1, label='Weighting function', color='C0')
-    line02, = ax0_dual.plot(dfa['temperature_operative'], label='temperature_default', color='C0')
-    # ax0_dual.set_ylim(-0.25, 1.05)
-    axs[0].set_ylim(-100, 4500)
+    ax0_dual.set_ylabel('Indoor temperature in °C', fontstyle='italic')
+    line02, = axs[0].plot(load1, label='Weight', color='black')
+    line03, = ax0_dual.plot(dfa['temperature_operative'], label='Temperature', color='magenta')
+    axs[0].set_ylim([-0.44, 1.04])
+    ax0_dual.set_ylim([17.8, 25.2])
 
     # Adding legends
-    lines0 = [line01, line02]
+    lines0 = [line01, line02, line03]
     labels0 = [line.get_label() for line in lines0]
-    axs[0].legend(lines0, labels0, loc='upper left', prop={'style': 'italic'})
+    axs[0].legend(lines0, labels0, loc='lower right', prop={'style': 'italic'})
 
     dfb = pd.DataFrame(load1_pv)
     dfb['heating_strategy'] = np.repeat(result_pv['actuation_sequence'], 60)
     dfb['temperature_operative'] = temperature_pv
 
-    line11, = axs[1].plot(dfb['heating_strategy'], label='Heating strategy', color='orange')
-    axs[1].set_ylabel('Heating power in W', fontstyle='italic')
+    line11, = axs[1].plot(dfb['heating_strategy']/dfb['heating_strategy'].max(), label='Heating', color='orange')
+    axs[1].set_ylabel('Heating (norm.) and weighting function', fontstyle='italic')
     ax1_dual = axs[1].twinx()
-    ax1_dual.set_ylabel('Weighting function', fontstyle='italic')
-    # line12, = ax1_dual.plot(load1_pv, label='Weighting function', color='C0')
-    line12, = ax1_dual.plot(dfb['temperature_operative'], label='temperature_pv', color='C0')
-    # ax1_dual.set_ylim(-0.25, 1.05)
-    axs[1].set_ylim(-100, 4500)
+    ax1_dual.set_ylabel('Indoor temperature in °C', fontstyle='italic')
+
+    line12, = axs[1].plot(load1_pv, label='Weight', color='black')
+    line13, = ax1_dual.plot(dfb['temperature_operative'], label='Temperature', color='magenta')
+    axs[1].set_ylim([-0.44, 1.04])
+    ax1_dual.set_ylim([17.8, 25.2])
 
     # Adding legends
-    lines1 = [line11, line12]
+    lines1 = [line11, line12, line13]
     labels1 = [line.get_label() for line in lines1]
-    axs[1].legend(lines1, labels1, loc='upper left', prop={'style': 'italic'})
+    axs[1].legend(lines1, labels1, loc='lower right', prop={'style': 'italic'})
 
     axs[0].grid(True)
     axs[1].grid(True)
